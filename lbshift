@@ -1,0 +1,489 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_lbshft.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: wen_ruifeng $
+REV DATE       : $Date: 2018/08/16 02:10:52 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :CSY\HCSYCNNE0322
+PURPOSE        :create 表14.3.3.1.2I 空腹试验血常规前后交叉表– 安全性分析集
+create 表14.3.3.1.2II 餐后试验血常规前后交叉表– 安全性分析集
+create 表14.3.3.2.2I 空腹试验血生化前后交叉表– 安全性分析集
+create 表14.3.3.2.2II 餐后试验血生化前后交叉表– 安全性分析集
+create 表14.3.3.3.2I 空腹试验凝血功能前后交叉表– 安全性分析集
+create 表14.3.3.3.2II 餐后试验凝血功能前后交叉表– 安全性分析集
+create 表14.3.3.4.2I 空腹试验尿常规前后交叉表– 安全性分析集
+create 表14.3.3.4.2II 餐后试验尿常规前后交叉表– 安全性分析集
+INPUT FILES    :derived.adsl
+OUTPUT FILES   :t_14_3_3_1_2I_lbshft.rtf,t_14_3_3_1_2II_lbshft.rtf,t_14_3_3_2_2I_lbshft.rtf,t_14_3_3_2_2II_lbshft.rtf
+t_14_3_3_3_2I_lbshft.rtf,t_14_3_3_3_2II_lbshft.rtf,t_14_3_3_4_2I_lbshft.rtf,t_14_3_3_4_2II_lbshft.rtf
+MACROS USED    :%mc_clrup;%mc_gtbtf;%mc_addpn;%mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=t_lbshift;
+%let dataset=%str(ADLB);
+%let reflis=%str();
+
+proc printto log="&tablog\&progname..log" new;
+run;
+
+%macro lbshift(cond1=,cond2=,outname=,REFLIS=,m=);
+	%let outname=&outname.;
+
+	*clean out dataset;
+	%mc_clrup;
+	%let progname=t_lbshift;
+	%let dataset=%str(ADLB);
+
+	*calculate 随机入组人数;
+	data adsl;
+		set derived.adsl(where=&cond1.);
+	run;
+
+	proc sql;
+		select count(usubjid) into : rand1 from adsl where SAFFL='是' and trtseqan=1;
+		select count(usubjid) into : rand2 from adsl where SAFFL='是' and trtseqan=2;
+		select count(usubjid) into : rand3 from adsl where SAFFL='是' and trtseqan in(1,2);
+	quit;
+
+	*fetch and sort data from derived.adlb;
+	data adlb;
+		set derived.adlb(where=&cond2.);
+
+		if SAFFL='是' and avisit ^="" and paramn not in(991,992,993,994);
+		keep trtseqaN trtseqa usubjid SAFFL paramn param LBSIG LBSIGN avisit avisitn atpt atptn ablfl PARCAT1 PARCAT1N visitnum visit;
+	run;
+
+	data adlb;
+	set adlb;
+	if param="尿胆原（umol/L）" then param="尿胆原";
+	%if &m.=1 %then %do; param=kscan(param,1,"（");%end;
+	run;
+
+		*get base;
+	data base;
+		set adlb;
+
+		if ablfl='Y' and avisitn=0;
+		base=LBSIGN;
+
+		if base=. then
+			base=4;
+	run;
+
+	*get usubjid from adsl;
+	data adsl_;
+		set adsl;
+
+		if SAFFL='是';
+		keep usubjid trtseqaN;
+	run;
+
+	*get all paramn;
+	proc sort data=adlb out=adlb_(keep=paramn param) nodupkey;
+		by paramn;
+	run;
+
+	proc sql noprint;
+		select paramn into: paramn separated by ', ' from adlb_;
+	quit;
+
+	*get 未查;
+	data adsl2;
+		set adsl_;
+
+		do paramn = &paramn;
+			base=4;
+			output;
+		end;
+	run;
+
+	proc sort data=base;
+		by  usubjid paramn;
+	run;
+
+	proc sort data=adsl2;
+		by  usubjid paramn;
+	run;
+
+	data base2;
+		merge adsl2 base;
+		by  usubjid paramn;
+	run;
+
+	data base3;
+		set base2(where=(trtseqan=1));
+	run;
+
+	data base4;
+		set base2(where=(trtseqan=2));
+	run;
+
+	*get post;
+	data post1;
+		set adlb(where=(trtseqan=1 and avisitn ^=0));
+
+		/*	if ablfl ne '是';*/
+		aval1=LBSIGN;
+
+		if aval1=. then
+			delete;
+	run;
+
+	data post2;
+		set adlb(where=(trtseqan=2 and avisitn ^=0));
+
+		/*	if ablfl ne '是';*/
+		aval2=LBSIGN;
+
+		if aval2=. then
+			delete;
+	run;
+
+	proc sort data=post1;
+		by  usubjid paramn aval1;
+	run;
+
+	proc sort data=post2;
+		by  usubjid paramn aval2;
+	run;
+
+	*get the worst;
+	data worst1;
+		set post1;
+		by  usubjid paramn aval1;
+
+		if last.paramn;
+	run;
+
+	data worst2;
+		set post2;
+		by  usubjid paramn aval2;
+
+		if last.paramn;
+	run;
+
+	*merge base with post;
+	data all;
+		merge base3(in=a) worst1(in=b);
+		by  usubjid paramn;
+
+		if aval1=. then
+			aval1=4;
+
+		/*	if aval2=. then aval2=4;*/
+		output;
+		aval1=5;
+
+		/*	aval2=5;*/
+		output;
+	run;
+
+	data all_;
+		merge base4(in=a)  worst2(in=c);
+		by  usubjid paramn;
+
+		/*	if aval1=. then aval1=4;*/
+		if aval2=. then
+			aval2=4;
+		output;
+
+		/*	aval1=5;*/
+		aval2=5;
+		output;
+	run;
+
+	data all2;
+		set all;
+		output;
+		base=5;
+		output;
+	run;
+
+	data all2_;
+		set all_;
+		output;
+		base=5;
+		output;
+	run;
+
+	*calculate number;
+	proc freq data=all2 noprint;
+		table paramn*base*aval1/ out=all3 (drop=percent);
+
+			/*	table paramn*base*aval2/ out=all4 (drop=percent);*/
+	run;
+
+	proc freq data=all2_ noprint;
+		/*	table paramn*base*aval1/ out=all3 (drop=percent);*/
+		table paramn*base*aval2/ out=all4 (drop=percent);
+	run;
+
+	*create temple;
+	proc sort data=all3 out=temp1_(keep=paramn) nodupkey;
+		by paramn;
+	run;
+
+	proc sort data=all4 out=temp2_(keep=paramn) nodupkey;
+		by paramn;
+	run;
+
+	data temple1;
+		set temp1_;
+
+		do base= 1 to 5;
+			do aval1=1 to 5;
+				count=0;
+				output;
+			end;
+		end;
+	run;
+
+	data temple2;
+		set temp2_;
+
+		do base= 1 to 5;
+			do aval2=1 to 5;
+				count=0;
+				output;
+			end;
+		end;
+	run;
+
+	*merge to get all data;
+	proc sort data=all3;
+		by paramn base aval1;
+	run;
+
+	proc sort data=all4;
+		by paramn base aval2;
+	run;
+
+	data all5;
+		merge temple1 all3;
+		by  paramn base aval1;
+		cp=put(count, 4.);
+	run;
+
+	data all6;
+		merge temple2 all4;
+		by  paramn base aval2;
+		cp=put(count, 4.);
+	run;
+
+	proc sort data=all5;
+		by  paramn base;
+	run;
+
+	proc sort data=all6;
+		by  paramn base;
+	run;
+
+	proc transpose data=all5 out=all7 prefix=a;
+		by paramn base;
+		var count;
+		id aval1;
+	run;
+
+	proc transpose data=all6 out=all8 prefix=b;
+		by paramn base;
+		var count;
+		id aval2;
+	run;
+
+	*get param;
+	proc sort data=all7;
+		by paramn;
+	run;
+
+	proc sort data=all8;
+		by paramn;
+	run;
+
+	data all9;
+		merge all7 adlb_;
+		by paramn;
+	run;
+
+	data all10;
+		merge all8 adlb_;
+		by paramn;
+	run;
+
+	proc sort data=all9;
+		by  paramn base;
+	run;
+
+	proc sort data=all10;
+		by  paramn base;
+	run;
+
+	data final;
+		merge all9 all10;
+		by paramn base;
+		length col1-col12 $200;
+		col1=strip(PARAM);
+
+		if base=1 then
+			col2='正常';
+		else if base=2 then
+			col2='异常无临床意义';
+		else if base=3 then
+			col2='异常有临床意义';
+		else if base=4 then
+			col2='未查';
+		else if base=5 then
+			col2='合计';
+
+		/*	col3=a1; col4=a2; col5=a3; col6=a4; col7=a5;*/
+		/*	col8=b1; col9=b2; col10=b3; col11=b4; col12=b5;*/
+	run;
+
+	proc sort data=final;
+		by paramn base;
+	run;
+
+%macro percent(aval=,per=,rand=,col=);
+
+	data final;
+		set final;
+
+		if &aval.=0 then
+			&col.="0";
+		else
+			do &per.=&aval./&rand.*100;
+				if &per.=100 then
+					&col.=strip(put(&aval.,best.))||" ("||strip(put(&per.,4.0))||")";
+				else if 10<=&per.<100 then
+					&col.=strip(put(&aval.,best.))||"  ("||strip(put(&per.,4.1))||")";
+				else if &per.<10 then
+					&col.=strip(put(&aval.,best.))||"   ("||strip(put(&per.,3.1))||")";
+			end;
+	run;
+
+%mend;
+
+%percent(aval=a1,per=per1,rand=&rand1.,col=col3);
+%percent(aval=a2,per=per2,rand=&rand1.,col=col4);
+%percent(aval=a3,per=per3,rand=&rand1.,col=col5);
+%percent(aval=a4,per=per4,rand=&rand1.,col=col6);
+%percent(aval=a5,per=per5,rand=&rand1.,col=col7);
+%percent(aval=b1,per=per6,rand=&rand2.,col=col8);
+%percent(aval=b2,per=per7,rand=&rand2.,col=col9);
+%percent(aval=b3,per=per8,rand=&rand2.,col=col10);
+%percent(aval=b4,per=per9,rand=&rand2.,col=col11);
+%percent(aval=b5,per=per10,rand=&rand2.,col=col12);
+
+data final1;
+	set final;
+	col1=tranwrd(col1,"^","^^");
+run;
+
+*save dataset for qc;
+data table.&outname.;
+	set final;
+	array col{12} col1-col12;
+
+	do i= 1 to 12;
+		col{i}=compress(col{i});
+	end;
+
+	keep col:;
+run;
+
+ods listing close;
+ods rtf file="&pathtab\&outname..rtf" style=rptstyle;
+ods escapechar="^";
+
+%mc_gtbtf(titledset=derived.ddtitles,name=&outname.);
+%mc_addpn(data=final1,by=paramn base, line=,
+	pageno=%str(line+1; if (first.paramn and line>18) then line=1; if line=1 then page+1;));
+
+proc report data=final1 nowindows missing split="#" headline;
+	column page pagetxt  paramn col1 base col2 
+		("用药后最差结果&border" ("受试制剂-参比制剂" col3-col7)("参比制剂-受试制剂" col8-col12));
+	define page			/order order=internal noprint;
+	define pagetxt 		/order=internal noprint;
+	define base			/order order=internal noprint;
+	define paramn		/order order=internal noprint;
+	define col1			/order "检查项目"
+		style(column)={just=l cellwidth=12%}
+		style(header)={just=l};
+	define col2			/order "基线"
+		style(column)={just=l cellwidth=10%}
+		style(header)={just=l};
+	define col3			/display "正常"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col4			/display "异常无#临床意义"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col5			/display "异常有#临床意义"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col6			/display "未查"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col7 		/display "合计"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col8			/display "正常"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col9			/display "异常无#临床意义"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col10			/display "异常有#临床意义"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col11			/display "未查"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+	define col12		/display "合计"
+		style(column)={just=l  vjust=b asis=on cellwidth=7%
+		pretext="^R'\qj\tqdec\tx200 '"}
+		style(header)={just=c};
+
+	compute before page;
+		line "";
+	endcomp;
+
+	compute after paramn;
+		line "";
+	endcomp;
+
+	break after page/page;
+
+	%mc_adtf(adftxt=%str(pagetxt $200.), blank=none);
+run;
+
+ods rtf close;
+ods listing;
+%mend;
+
+%lbshift( cond1=(trtgrpn=1 ),cond2=(trtgrpn=1 and parcat1n=1),outname=t_14_3_3_1_2I_lbshft, REFLIS=%STR(16.2.7.1I),m=1);
+%lbshift( cond1=(trtgrpn=2 ),cond2=(trtgrpn=2 and parcat1n=1),outname=t_14_3_3_1_2II_lbshft, REFLIS=%STR(16.2.7.2I),m=1);
+%lbshift( cond1=(trtgrpn=1 ),cond2=(trtgrpn=1 and parcat1n=2),outname=t_14_3_3_2_2I_lbshft, REFLIS=%STR(16.2.7.1I),m=1);
+%lbshift( cond1=(trtgrpn=2 ),cond2=(trtgrpn=2 and parcat1n=2),outname=t_14_3_3_2_2II_lbshft, REFLIS=%STR(16.2.7.2I),m=1);
+%lbshift( cond1=(trtgrpn=1 ),cond2=(trtgrpn=1 and parcat1n=3),outname=t_14_3_3_3_2I_lbshft, REFLIS=%STR(16.2.7.1I),m=1);
+%lbshift( cond1=(trtgrpn=2 ),cond2=(trtgrpn=2 and parcat1n=3),outname=t_14_3_3_3_2II_lbshft, REFLIS=%STR(16.2.7.2I),m=1);
+%lbshift( cond1=(trtgrpn=1 ),cond2=(trtgrpn=1 and parcat1n=4),outname=t_14_3_3_4_2I_lbshft, REFLIS=%STR(16.2.7.1I),m=0);
+%lbshift( cond1=(trtgrpn=2 ),cond2=(trtgrpn=2 and parcat1n=4),outname=t_14_3_3_4_2II_lbshft, REFLIS=%STR(16.2.7.2I),m=0);
+
+*clean out work datasets;
+%mc_clrup;
+%put >>>Program run by $SYSUSERID ON &sysdate9 at &systime <<<;
+
+proc printto;
+run;
