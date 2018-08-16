@@ -1,0 +1,302 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_vs.sas,v $
+REV/REV        : $Revision: 1.2 $
+AUTH           : $Author: wen_ruifeng $
+REV DATE       : $Date: 2018/08/15 10:08:37 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :CSY\HCSYCNNE0322
+PURPOSE        :create 表14.3.4I 空腹试验生命体征总结– 安全性分析集 
+create 表14.3.4II 餐后试验生命体征总结– 安全性分析集 
+INPUT FILES    :derived.adsl
+OUTPUT FILES   :t_14_3_4I_vs.rtf,t_14_3_4II_vs.rtf
+MACROS USED    :%mc_clrup;%mc_gtbtf;%mc_addpn;%mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+*clean out dataset;
+%mc_clrup;
+%let progname=t_vs;
+%let dataset=%str(ADVS);
+
+proc printto log="&tablog\&progname..log" new;
+run;
+
+%macro vs(outname=,cond=,REFLIS=);
+	%let outname=&outname.;
+	%let reflis=%str();
+
+	*calculate 随机入组人数;
+	data adsl;
+		set derived.adsl(where=(SAFFL="是"));
+	run;
+
+	data adsl;
+		set adsl(where=&cond.);
+	run;
+
+	proc sql;
+		select count(usubjid) into : pop1 from ADSL where trtseqan=1;
+		select count(usubjid) into : pop2 from ADSL where trtseqan=2;
+	quit;
+
+	*fetch and sort data from derived.adlb;
+	data advs;
+		set derived.advs(where=&cond.);
+
+		if SAFFL='是' and  paramn ^=999;
+		keep subjid trtseqa trtseqaN param paramn atpt atptn
+			ablfl basetype base1 base2 aval chg1 chg2 avisit avisitn aperiod;
+	run;
+
+	data advs;
+		set advs(where=(atptn ne . ));
+	run;
+
+	proc sort data=advs;
+		by trtseqan trtseqa paramn param aperiod atptn atpt;
+	run;
+
+	*get dp;
+	proc sql noprint;
+		create table dp as
+			select max(lengthn(scan(put(aval,best.),2,'.'))) as dp, paramn
+				from advs
+					group by paramn
+						order by paramn;
+	quit;
+
+	proc sort data=advs;
+		by paramn;
+	run;
+
+	*merge dp with data;
+	data advs2;
+		merge advs dp;
+		length dp0 dp1 dp2 $200;
+		by paramn;
+		dp0=put((12+dp/10),best.);
+		dp1=put((12+(dp+1)/10),best.);
+		dp2=put((12+(dp+2)/10),best.);
+		r0=10**(-dp);
+		r1=10**(-dp-1);
+		r2=10**(-dp-2);
+		array a{3} r0 r1 r2;
+		array b{3} dp0 dp1 dp2;
+
+		do i=1 to 3;
+			if a{i}<0.0001 then
+				a{i}=0.0001;
+
+			if input(b{i},best.)>12.4 then
+				b{i}='12.4';
+		end;
+	run;
+
+	proc sort data=advs2;
+		by trtseqan trtseqa PARAMN PARAM aperiod atptn atpt;
+	run;
+
+%macro mean(data1=, data2=, var=);
+	*calculate by proc means;
+	proc means data=advs2(where=(&var ne .)) noprint;
+		var &var;
+		by trtseqan trtseqa PARAMN PARAM  aperiod atptn atpt dp0 dp1 dp2 r1 r2 r0;
+		output out=&data1
+			n=_n
+			mean=_mean
+			std=_sd
+			median=_median
+			min=_min
+			max=_max/autolabel;
+	run;
+
+	data &data2;
+		set &data1;
+		length n_nmiss Mean_SD Median min_max $200;
+
+		if trtseqaN=1 then
+			n_nmiss=strip(put(_n,best.))||' ('||strip(put(&pop1-_n,best.))||')';
+		else if trtseqaN=2 then
+			n_nmiss=strip(put(_n,best.))||' ('||strip(put(&pop2-_n,best.))||')';
+
+		if _n ne 0 and _n ne 1 then
+			do;
+				n=strip(put(_n,5.));
+				mean_sd=strip(putn(round(_mean,r1),dp1))||' ('||strip(putn(round(_sd,r2),dp2))||')';
+				median=strip(putn(round(_median,r1),dp1));
+				min_max=strip(putn(round(_min,r0),dp0))||', '||strip(putn(round(_max,r0),dp0));
+			end;
+
+		if _n=0 then
+			do;
+				n='';
+				mean_sd='';
+				median='';
+				min_max='';
+			end;
+
+		if _n=1 then
+			do;
+				n=strip(put(_n,5.));
+				mean_sd=strip(putn(round(_mean,r1),dp1))||' (-)';
+				median=strip(putn(round(_median,r1),dp1));
+				min_max=strip(putn(round(_min,r0),dp0))||', '||strip(putn(round(_max,r0),dp0));
+			end;
+	run;
+
+	run;
+
+%mend;
+
+%mean(data1=aval1, data2=aval2, var=aval);
+%mean(data1=chg1_1, data2=chg1_2, var=chg1);
+%mean(data1=chg2_1, data2=chg2_2, var=chg2);
+
+data all;
+	set aval2(in=a) chg1_2(in=b) chg2_2(in=c);
+
+	if a then
+		order=1;
+	else if b then
+		order=2;
+	else if c then
+		order=3;
+run;
+
+proc sort data=all;
+	by PARAMN PARAM aperiod atptn atpt order;
+run;
+
+proc transpose data=all out=all2 prefix=a;
+	by PARAMN PARAM aperiod atptn  atpt  order;
+	var n_nmiss Mean_SD Median min_max;
+	id trtseqaN;
+run;
+
+data all3;
+	set all2;
+	length col2 $200.;
+
+	/*	if atptn=1.2 then col2="第一周期服药后2小时";*/
+	/*	else if atptn=7.2 then col2="第二周期服药后2小时";*/
+	col2=strip(atpt);
+run;
+
+data final;
+	set all3;
+	length col1-col5 $200;
+	col1=strip(PARAM);
+
+	if order=1 and lowcase(_name_)='n_nmiss' then
+		do;
+			order2=1;
+			col3='人数（缺失）';
+		end;
+
+	if order=2 and lowcase(_name_)='n_nmiss' then
+		do;
+			order2=1;
+			col3="^R'\b '"||'较基线变化'||"^R'\b0 '^n"||'人数（缺失）';
+		end;
+
+	if order=3 and lowcase(_name_)='n_nmiss' then
+		do;
+			order2=1;
+			col3="^R'\b '"||'较第二周期基线变化'||"^R'\b0 '^n"||'人数（缺失）';
+		end;
+	else if lowcase(_name_)='mean_sd' then
+		do;
+			order2=2;
+			col3='平均数（标准差）';
+		end;
+	else if lowcase(_name_)='median' then
+		do;
+			order2=3;
+			col3='中位数';
+		end;
+	else if lowcase(_name_)='min_max' then
+		do;
+			order2=4;
+			col3='最小值，最大值';
+		end;
+
+	col4=a1;
+	col5=a2;
+run;
+
+proc sort data=final;
+	by paramn param aperiod atptn order order2;
+run;
+
+*save dataset for qc;
+data table.&outname.;
+	set final;
+	col1=compress(col1);
+	col2=compress(col2);
+	col3=compress(col3);
+	col4=compress(col4);
+	col5=compress(col5);
+	keep col:;
+run;
+
+ods listing close;
+ods rtf file="&pathtab\&outname..rtf" style=rptstyle;
+ods escapechar="^";
+
+%mc_gtbtf(titledset=derived.ddtitles,name=&outname.);
+%mc_addpn(data=final,by=paramn aperiod atptn order order2, line=,
+	pageno=%str(line+1; if first.atptn and line>14 then line=1; if line=1 then page+1;));
+
+proc report data=final nowindows missing split="#" headline;
+	column page pagetxt paramn col1 aperiod atptn col2 order order2 col3-col5;
+	define page			/order order=internal noprint;
+	define pagetxt 		/order=internal noprint;
+	define paramn		/order order=internal noprint;
+	define aperiod		/order order=internal noprint;
+	define atptn		/order order=internal noprint;
+	define order		/order order=internal noprint;
+	define order2		/order order=internal noprint;
+	define col1			/order "检查项目（单位）"
+		style(column)={just=l cellwidth=18%}
+		style(header)={just=l};
+	define col2			/order "检查时间点"
+		style(column)={just=l cellwidth=18%}
+		style(header)={just=l};
+	define col3			/order "统计参数"
+		style(column)={just=l cellwidth=13%}
+		style(header)={just=l};
+	define col4			/display "受试制剂-参比制剂#(N = %sysfunc(compress(&pop1)))"
+		style(column)={just=c vjust=b asis=on cellwidth=20%}
+		style(header)={just=c};
+	define col5			/display "参比制剂-受试制剂#(N = %sysfunc(compress(&pop2)))"
+		style(column)={just=c vjust=b asis=on cellwidth=20%}
+		style(header)={just=c};
+
+	compute before page;
+		line "";
+	endcomp;
+
+	compute after order;
+		line "";
+	endcomp;
+
+	break after page/page;
+
+	%mc_adtf(adftxt=%str(pagetxt $150.), blank=none);
+run;
+
+ods rtf close;
+ods listing;
+%mend;
+
+%vs( cond=(trtgrpn=1),outname=t_14_3_4I_vs, REFLIS=%STR(16.2.9.2.1I ));
+%vs( cond=(trtgrpn=2),outname=t_14_3_4II_vs, REFLIS=%STR(16.2.9.2.1II ));
+
+*clean out work datasets;
+%mc_clrup;
+%put >>>Program run by $SYSUSERID ON &sysdate9 at &systime <<<;
+
+proc printto;
+run;
