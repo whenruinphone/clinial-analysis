@@ -1,0 +1,287 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: l_lb.sas,v $
+REV/REV        : $Revision: 1.3 $
+AUTH           : $Author: wen_ruifeng $
+REV DATE       : $Date: 2018/08/16 02:52:26 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :CSY\HCSYCNNE0322
+PURPOSE        :create 清单16.2.8.1.1I 空腹试验血常规检测结果– 安全性分析集
+create 清单16.2.8.1.2I 空腹试验血常规异常检测结果– 安全性分析集
+create 清单16.2.8.2.1I 空腹试验血生化检测结果– 安全性分析集
+create 清单16.2.8.2.2I 空腹试验血生化异常检测结果– 安全性分析集
+create 清单16.2.8.3.1I 空腹试验凝血功能检测结果– 安全性分析集
+create 清单16.2.8.3.2I 空腹试验凝血功能异常检测结果– 安全性分析集
+create 清单16.2.8.4.1I 空腹试验尿常规检测结果– 安全性分析集
+create 清单16.2.8.4.2I 空腹试验尿常规异常检测结果– 安全性分析集
+create 清单16.2.8.1.1II 餐后试验血常规检测结果– 安全性分析集
+create 清单16.2.8.1.2II 餐后试验血常规异常检测结果– 安全性分析集
+create 清单16.2.8.2.1II 餐后试验血生化检测结果– 安全性分析集
+create 清单16.2.8.2.2II 餐后试验血生化异常检测结果– 安全性分析集
+create 清单16.2.8.3.1II 餐后试验凝血功能检测结果– 安全性分析集
+create 清单16.2.8.3.2II 餐后试验凝血功能异常检测结果– 安全性分析集
+create 清单16.2.8.4.1II 餐后试验尿常规检测结果– 安全性分析集
+create 清单16.2.8.4.2II 餐后试验尿常规异常检测结果– 安全性分析集
+INPUT FILES    :derived.adlb
+OUTPUT FILES   :l_16_2_8_1_1I_lb.rtf,l_16_2_8_1_1II_lb.rtf,l_16_2_8_1_2I_lb.rtf,l_16_2_8_1_2II_lb.rtf,
+l_16_2_8_2_1I_lb.rtf,l_16_2_8_2_1II_lb.rtf,l_16_2_8_2_2I_lb.rtf,l_16_2_8_2_2II_lb.rtf,
+l_16_2_8_3_1I_lb.rtf,l_16_2_8_3_1II_lb.rtf,l_16_2_8_3_2I_lb.rtf,l_16_2_8_3_2II_lb.rtf,
+l_16_2_8_4_1I_lb.rtf,l_16_2_8_4_1II_lb.rtf,l_16_2_8_4_2I_lb.rtf,l_16_2_8_4_2II_lb.rtf
+MACROS USED    :%mc_clrup %mc_gtbtf %mc_addpn %mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=l_lb;
+%let dataset=%str(ADLB);
+%let reflis=%str();
+
+proc printto log = "&listlog.\&progname..log"  new;
+run;
+
+%macro lb(outname=,cond=,m=,var1=,var2=);
+	%let outname=&outname.;
+
+	data adlb;
+		set derived.adlb(where=(saffl="是"));
+		keep randnum age sex trtgrp trtgrpn trtseqp trtseqpn lbstat lbreasnd parcat1 parcat1n 
+			param paramn visit visitnum avalc lbstnrc lbsig lbsign lbabncs ddtday;
+	run;
+
+	data adlb2;
+		set adlb(where=&cond.);
+		header="^R/RTF'\par\fs16\ql '"||"试验序列组别: "|| compress(&var2.);
+	run;
+
+	/*for missing data to check*/
+	proc sql noprint;
+		select count(*) into:obs1 from adlb2 where &var1.=1;
+		select count(*) into:obs2 from adlb2 where &var1.=2;
+		select count(*) into:obsall from adlb2;
+	quit;
+
+	%put &obs1. &obs2. &obsall.;
+
+	/*if &var1. in (1 2 3) is not null ,sort final dataset*/
+	%if &obs1.^=0 and &obs2.^=0 %then
+		%do;
+
+			proc sort data=adlb2(where=(&var1.^=.)) out=adlb3;
+				by &var1. trtseqp randnum;
+			run;
+
+		%end;
+
+	/*The other three cases generate the final dataset in turn*/
+	%else
+		%do;
+
+			data final1;
+				length randnum $9.  sex $3. trtgrp $20. trtseqp $30.  lbstat $8. lbreasnd param lbabncs $200. parcat1 $50.  
+					visit $50. avalc $25. lbstnrc lbsig ddtday $50. header $ 200.;
+				call missing(of randnum,sex,trtgrp,trtseqp,lbstat,lbreasnd, param, lbabncs,parcat1,  
+					visit,avalc,lbstnrc, lbsig, ddtday);
+				age=.;
+				TRTSEQPN=.;
+				PARCAT1N=.;
+				paramn=.;
+				visitnum=.;
+				lbsign=.;
+				&var1.=1;
+				header="^R/RTF'\par\fs16\ql '"||"试验序列组别：受试制剂-参比制剂";
+				output;
+				&var1.=2;
+				header="^R/RTF'\par\fs16\ql '"||"试验序列组别：参比制剂-受试制剂";
+				output;
+			run;
+
+			%if &obsall.^=0 %then
+				%do;
+
+					proc sort data=adlb2;
+						by &var1. trtseqp randnum;
+					run;
+
+					data final2;
+						merge  final1 adlb2;
+						by &var1. trtseqp randnum;
+					run;
+
+				%end;
+			%else
+				%do;
+
+					data final2;
+						merge  final1 adlb2;
+						by &var1. trtseqp randnum;
+					run;
+
+				%end;
+
+			proc sql noprint;
+				create table final3 as
+					select *,count(*) as obs
+						from final2
+							group by &var1.
+								order by &var1.,trtseqp, randnum;
+			quit;
+
+			data final4;
+				set final3;
+				by &var1. trtseqp randnum;
+
+				if obs>1 and first.&var1. then
+					delete;
+			run;
+
+			proc sort data=final4(where=(&var1.^=.)) out=adlb3(drop=obs);
+				by &var1. trtseqp randnum visitnum paramn ddtday;
+			run;
+
+		%end;
+
+	proc sort data=adlb3;
+		by trtseqpn randnum visitnum paramn ddtday;
+	run;
+
+	data listing.&outname.;
+		set adlb3;
+
+		%if &m.=1 %then
+			%do;
+				keep randnum age sex visit lbstat lbreasnd param ddtday avalc lbstnrc lbsig;
+			%end;
+		%else %if &m.=0 %then
+			%do;
+				keep randnum age sex visit lbstat lbreasnd param ddtday avalc lbstnrc lbsig lbabncs;
+			%end;
+	run;
+
+	data adlb4;
+		set adlb3;
+		param=tranwrd(param,"^","^^");
+	run;
+
+	/*proc sort data=adlb4;*/
+	/*by trtseqpn randnum visitnum parcat1n paramn ddtday;*/
+	/*run;*/
+	/*insert title and footnote*/
+	%mc_gtbtf(titledset=derived.ddtitles,name=&outname.);
+
+	/*add page*/
+	%mc_addpn(data=adlb4,by=&var1. trtseqp randnum ,line=,pageno=%str(line+1;if (first.&var1. or line>28)  then line=1;
+		if(line=1) then page+1));
+
+	/*create listing*/
+	ods listing close;
+	ods rtf file="&pathlist.\&outname..rtf" style=rptstyle;
+
+	%do j=1 %to 2;
+
+		proc report data=adlb4(where=(&var1.=&j.)) nowd missing split='#' headline;
+			column page pagetxt header (&var1. randnum age sex visitnum visit lbstat lbreasnd param ddtday avalc lbstnrc
+			lbsig %if &m=0 %then
+
+				%do;
+					lbabncs
+				%end;
+			);
+			define page   /order order=internal noprint;
+			define pagetxt      /order=internal noprint;
+			define header   /order=internal noprint;
+				define &var1. /order=internal noprint;
+					define trtseqpn  /order order=internal noprint;
+					define randnum  /order order=internal  style(column)=[just=l cellwidth=6%]
+						style(header)=[just=l] "入组编号";
+					define age  /order order=internal style(column)=[just=c cellwidth=3%]
+						style(header)=[just=c] "年龄";
+					define sex  /order order=internal style(column)=[just=c cellwidth=3%]
+						style(header)=[just=c]"性别";
+						define visitnum  /order  order=internal noprint;
+						define visit  /order order=internal style(column)=[just=l cellwidth=12%]
+							style(header)=[just=l] "访视";
+						define lbstat  /style(column)=[just=c cellwidth=3%]
+							style(header)=[just=c] "是否#检查";
+						define lbreasnd  /style(column)=[just=l cellwidth=7%]
+							style(header)=[just=l] "否，说明原因";
+						define param  /order order=internal style(column)=[just=l cellwidth=14%]
+							style(header)=[just=l]"检查项目（单位）";
+						define ddtday  /order order=internal style(column)=[just=l cellwidth=10%]
+							style(header)=[just=l] "采样日期(研究天数）";
+
+							%if &m.=0 %then
+								%do;
+								define avalc  /display style(column)=[just=l cellwidth=6% pretext="^R'\qj\tqdec\tx450 '"]
+									style(header)=[just=c]"实测值";
+								%end;
+							%else
+								%do;
+								define avalc  /display style(column)=[just=l cellwidth=6%]
+									style(header)=[just=l]"实测值";
+								%end;
+
+						define lbstnrc  /display style(column)=[just=l cellwidth=10%]
+							style(header)=[just=l]"正常值范围";
+						define lbsig  /display style(column)=[just=l cellwidth=9%]
+							style(header)=[just=l]"临床意义判定";
+
+							%if &m.=0 %then
+								%do;
+								define lbabncs		/ display style(column)=[just=l cellwidth=8%]
+									style(header)=[just=l]"异常有临床#意义描述";
+								%end;
+
+							%if &&obs&j.=0 %then
+								%do;
+
+									compute before page;
+										line '';
+										line '没有异常的xxx检测结果';
+									endcomp;
+								%end;
+							%else
+								%do;
+
+									compute before page;
+										line "";
+									endcomp;
+
+									compute after &var1.;
+										line "";
+									endcomp;
+								%end;
+
+							break after page / page;
+
+							%mc_adtf(adtitle=%str(line header $200.),adftxt=%str(pagetxt $200.),gap=yes);
+		run;
+
+	%end;
+
+	ods rtf close;
+	ods listing;
+%mend lb;
+
+%lb(outname=l_16_2_8_1_1I_lb,cond=(trtgrpn=1 and parcat1n=1),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_1_1II_lb,cond=(trtgrpn=2 and parcat1n=1),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_1_2I_lb,cond=(trtgrpn=1 and parcat1n=1 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_1_2II_lb,cond=(trtgrpn=2 and parcat1n=1 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_2_1I_lb,cond=(trtgrpn=1 and parcat1n=2),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_2_1II_lb,cond=(trtgrpn=2 and parcat1n=2),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_2_2I_lb,cond=(trtgrpn=1 and parcat1n=2 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_2_2II_lb,cond=(trtgrpn=2 and parcat1n=2 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_3_1I_lb,cond=(trtgrpn=1 and parcat1n=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_3_1II_lb,cond=(trtgrpn=2 and parcat1n=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_3_2I_lb,cond=(trtgrpn=1 and parcat1n=3 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_3_2II_lb,cond=(trtgrpn=2 and parcat1n=3 and lbsign=3),m=0,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_4_1I_lb,cond=(trtgrpn=1 and parcat1n=4),m=1,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_4_1II_lb,cond=(trtgrpn=2 and parcat1n=4),m=1,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_4_2I_lb,cond=(trtgrpn=1 and parcat1n=4 and lbsign=3),m=1,var1=TRTSEQpn,var2=TRTSEQp);
+%lb(outname=l_16_2_8_4_2II_lb,cond=(trtgrpn=2 and parcat1n=4 and lbsign=3),m=1,var1=TRTSEQpn,var2=TRTSEQp);
+
+/**clean out work datasets;*/
+%mc_clrup;
+%put >>>Program run by $SYSUSERID ON &sysdate9 at &systime <<<;
+
+proc printto;
+run;
