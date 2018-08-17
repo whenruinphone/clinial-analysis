@@ -1,0 +1,96 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: ADML.sas,v $
+REV/REV        : $Revision: 1.3 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:44:09 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : ADML
+INPUT FILES    : RAW.BF, SAE DERIVED.ADSL
+OUTPUT FILES   : DERIVED.ADML
+MACROS USED    : %mc_clrup %idvar %isodt %xxdy %mapavisit %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%mc_clrup;
+
+%let progname=ADML;
+
+proc printto log = " &adamlog\&progname..log"  new; 
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+proc sql noprint;
+	select itmname into :varname separated by ' ' from derived.adms where memname='ADML';
+quit;
+%put &varname;
+
+%idvar(in=raw.bf, out=bf_);
+*sdtm.AE data;
+data bf1;
+	set bf_;
+	length MLSTAT $200 MLF10YN MLSTIM MLETIM $8;
+
+	if BFYN="否" and BFDESC^="" then MLSTAT="否，"||strip(BFDESC);
+	else MLSTAT=BFYN;
+
+	MLF10YN=BFYNX;
+	MLSTIM=BFSTTIM;
+	MLETIM=BFEDTIM;
+
+	%isodt(indt=BFDAT_RAW, outdt=MLDTC);
+run;
+%xxdy(in=bf1, out=bf2, indy=MLDTC, outdy=MLDY, periodf=N);
+
+data adsl_;
+	set derived.adsl;
+proc sort;
+	by usubjid;
+run;
+
+data bf3;
+	merge bf2(in=a) adsl_;
+	by usubjid;
+	if a;
+
+	%mapavisit;
+
+	length DDTDAY $50 dtc ddy $50;
+	if mldtc^='' then dtc=mldtc;
+	if MLDY^=. then ddy=strip(put(MLDY, best.));
+
+	if dtc^='' and ddy^='' then DDTDAY= strip(dtc) || " (" || strip(ddy) || ")";
+	else if dtc^='' and ddy='' then DDTDAY= strip(dtc) || " (-)";
+run;
+
+data final;
+	set bf3;
+	keep &varname.;
+run;
+
+
+*MARRTIB;
+%mattrib ( 		 inds    = final ,
+                 ddtfile = adms  ,
+                 outds   = adml ,
+                 dsname  = ADML ,
+                 ddtlib  = DERIVED  ,
+                 header  = NO    , 
+                 dlabel  = 'Meal Data Analysis Dataset'  ,
+                 cleanup = YES   );
+
+
+data derived.adml(label='Meal Data Analysis Dataset');
+	set adml;
+proc sort;
+	by STUDYID USUBJID MLDTC;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
