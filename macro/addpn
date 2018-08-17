@@ -1,0 +1,184 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mc_addpn.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: yu_zhi0701 $
+REV DATE       : $Date: 2018/07/22 14:37:34 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT  : 
+PURPOSE         : Macro to add page numbering/breaks
+INPUT FILES     : specified by macro call
+OUTPUT FILES    : specified by macro call
+MACROS USED     : none
+NOTES           : MACRO INPUTS:
+                : type    = type of output default=TL
+                : data    = input dataset
+                : outext  = output extension default=rtf
+                : by      = by variables
+                : line    = lines per page
+                : pageno  = code if not using lines per page
+                : pgvar   = additional variable to break page by
+                : skipvar = variable before which line break will be inserted in proc report
+                :           (named here to ensure blanks are counted in paging calculation)
+				        : splitpage = number of pages across which output will be split horizontally 
+                :            (default=0; only use if the number is 2 or more) 
+                : lab     = default=NO; changed to YES to use alternative escape char (typically lab outputs)
+
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+* Macro to add page numbering;
+  %macro mc_addpn(type=tl, data=, outext=rtf, by=, line=16, pageno=, flowvar1=, flowdth1=,
+                  flowvar2=, flowdth2=, pgvar=NO, skipvar=NO, splitpage=0, lab=NO);
+  %global npgs mpgs datetime;
+  %LET npgs=0; %LET mpgs=0;
+
+  %IF &splitpage NE 0 %THEN %DO;
+    data _null_;
+       length text1 text2 $600.;
+    	 text1='';
+    	 text2='';
+       %do f=1 %to &splitpage;
+           text1=trim(left(text1))||" page&f ";
+    		   text2=trim(left(text2))||" pagetxt&f ";
+  	   %end;
+  	   call symput ("text1",trim(left(text1)));
+  	   call symput ("text2",trim(left(text2)));
+    run;
+  %END;
+
+  data _null_;   
+    test=time(); 
+    time=compress(put(test,time5.));
+    if length(time)=4 then time='0'||compress(time);	
+	  call symput("timehhmm",time);	
+  run;
+
+  data _null_;
+	  length day $20.;
+	  day="&sysdate9.";
+	  day=strip(put(input(day, date9.), yymmdd10.));
+/*	  day=upcase(substr(day,1,2)||(substr(day,3,1))||lowcase(substr(day,4,2))||substr(day,6,4));*/
+	  call symput("day",trim(left(day)));
+	run;
+
+  %let datetime=%str(&day &timehhmm);
+
+  %local _stln_; 
+  %if %upcase(&type)=TL %then %do;
+        data &data;
+            set &data;  
+            by &by;
+    %if %length(&line)>0 %then %do;
+	       %IF &splitpage NE 0 %THEN %DO;
+            retain line page &text1 0;
+			   %END;
+			   %ELSE %DO;
+            retain line page 0;
+			   %END;
+    %* Calculate the maximum number of lines the flow variables will take up ;
+        %if %length(&flowvar1)>0 %then %do;
+            maxline1=ceil(length(&flowvar1)/&flowdth1);
+        %end;
+        %else %do;
+            maxline1=1;
+        %end;
+        %if %length(&flowvar2)>0 %then %do;
+            maxline2=ceil(length(&flowvar2)/&flowdth2);
+        %end;
+        %else %do;
+            maxline2=1;
+        %end;
+    %* Add on the maximum number of extra lines needed for each record ;
+    %* Following line replaced, now conditional on setting of SKIPVAR  ; 
+          %*line=line+max(1,maxline1,maxline2);                               
+    %* If skip variable is specified then add a line before each new value of this variable 
+       and set start line to 2 (the proc report "compute before" block will always put blank line at the top of each page) ;
+        %if %length(&skipvar)=0 %then %put WARNING: SKIPVAR parameter must have value ('NO' or variable name);  
+        %else %if &skipvar=NO %then %do;
+            line=line+max(1,maxline1,maxline2);
+            %let _stln_=1;
+        %end;
+        %else %do;
+            if _n_ ne 1 and first.&skipvar then line=line+max(1,maxline1,maxline2)+1;
+            else line=line+max(1,maxline1,maxline2);
+            %let _stln_=2;
+        %end;
+    %* Now see if this record would exceed the permitted number of lines per page and if so 
+       start a new page and reset line to be the number of lines that record required, 
+       using correct start line with respect to setting of SKIPVAR;
+        %if %length(&pgvar)=0 %then %put WARNING: PGVAR parameter must have value ('NO' or variable name);  
+        %else %if &pgvar = NO %then %do;
+            if _n_=1 or line>&line then do;                               
+	      %end;
+        %else %do;
+            if _n_=1 or line>&line or first.&pgvar then do;               
+			  %end;
+                line=max(&_stln_,maxline1,maxline2);
+                %do f=1 %to &splitpage;
+                   page&f=(page*&splitpage)+&f;
+        				%end;
+        				page=page+1;
+            end;
+      			call symput('npgs',compress(put(page,10.)));
+  			%IF &splitpage NE 0 %THEN %DO;
+            call symput('mpgs',compress(put(page*&splitpage,10.)));
+  			%END;
+    %end;
+    %else %if %length(&line)=0 %then %do;
+            &pageno;
+            call symput('npgs',compress(put(page,10.)));
+			  %IF &splitpage NE 0 %THEN %DO;
+			      call symput('mpgs',compress(put(page*&splitpage,10.)));
+				  %do f = 1 %to &splitpage;
+   				  page&f = (page*&splitpage) - (&splitpage - &f) ;
+				  %end;
+			  %END;
+    %end;
+        run;
+
+        data &data;
+            set &data;
+        %IF &splitpage NE 0 %THEN %DO;
+             length &text2 $200.;
+           %do f=1 %to &splitpage;
+               %IF %upcase(&lab) NE YES %THEN %DO;        
+               pagetxt&f=compbl("^R/RTF'\ql '\tqr\tx12800\tab Page "||put(page&f,10.)||" of &mpgs"); 
+               %END;
+        			 %ELSE %DO;
+        			 pagetxt&f=compbl("^R/RTF'\ql '\tqr\tx12800\tab Page "||put(page&f,10.)||" of &mpgs");
+        			 %END;
+           %end; 
+			  %END;
+			  %ELSE %DO;
+            length pagetxt $200.;          
+  		   	  %IF %upcase(&lab) NE YES %THEN %DO;          
+            pagetxt=compbl("^R/RTF'\ql '\tqr\tx12800\tab Page "||put(page,10.)||" of &npgs"); 
+            %END;
+            %ELSE %DO;
+            pagetxt=compbl("^R/RTF'\ql '\tqr\tx12800\tab Page "||put(page,10.)||" of &npgs");
+            %END;
+        %END;
+        run;
+
+  %end;
+  %else %if %upcase(&type)=FI %then %do;
+        
+		    data _null_;
+			pagetxt=compbl("^R/RTF'\ql\tqr\tx12800\tab ' Page %nrstr(&pg1) of %nrstr(&pg2)");
+            *pagetxt=compbl("Program: &progname..sas, Output: &output..&outext, Generated on: &day &timehhmm");
+            *pageno=compbl("Page %nrstr(&pg1) of %nrstr(&pg2)");
+            call symput('fnote1',compbl(pagetxt));
+            *call symput('fnote2',compbl(pageno));
+        run;
+       
+        footnote%eval(&nfnote+1) j=l f=&gfont h=&ogsize pt "&fnote1";
+        *footnote%eval(&nfnote+2) j=l f=&gfont h=&ogsize pt "&fnote2";
+
+  %end;
+    
+  %else %do;
+        %put WARNING: type must be TL or FI;
+  %end;
+  %mend mc_addpn;
