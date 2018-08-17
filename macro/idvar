@@ -1,0 +1,51 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: idvar.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: huang_feiyi $
+REV DATE       : $Date: 2018/07/16 09:02:11 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNPS0322
+PURPOSE        : IDVAR
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          : IDVAR MARCO to idertify USUBJID, SUBJID, STUDYID, DOMAIN
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro idvar(in=, out=);
+
+	data &out.;
+		length STUDYID $18 USUBJID $30 SUBJID $30;
+		set &in.(drop=studyid %if %sysfunc(upcase(&in)) = RAW.SUBJ %then %do; subjid %end;);
+
+
+		/**STUDYID**/
+		if cmiss(project) = 0 then studyid = "SYBE-PD008";
+
+		**STUDYID**;
+		studyid = "SYBE-PD008";
+
+
+
+		/**USUBJID**/
+		if cmiss(subject) = 0 then subject_= compress(subject, ,'kd');
+		if nmiss(siteid) = 0 then siteid_ = put(siteid, best.);
+			usubjid = catx('-', studyid, subject);
+		/**SUBJID**/
+	        subjid = strip(subject);
+
+		**USUBJID / SUBJID**;
+		if cmiss(subject) = 0 then do;
+		  usubjid = catx('-', studyid, subject);
+	      subjid = strip(subject);
+        end;
+    run;
+
+
+	proc sort data=&out.;
+		by usubjid;
+	run;
+
+%mend;
