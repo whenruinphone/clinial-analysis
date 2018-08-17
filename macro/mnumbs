@@ -1,0 +1,24 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mnumobs.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/07/13 08:31:17 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : count the number of observations in a dataset and store in a macro variable
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro mnumobs(data=);
+  %global numobs;
+  data _null_;
+	if 0 then set &data nobs=count;
+	call symput('numobs',left(put(count,8.)));
+	stop;
+  run;
+%mend mnumobs;
