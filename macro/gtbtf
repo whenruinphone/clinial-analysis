@@ -1,0 +1,302 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mc_gtbtf.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/02/05 06:47:25 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :
+PURPOSE         : Macro to add titles and footnotes
+INPUT FILES     : specified in macro call
+OUTPUT FILES    : none
+MACROS USED     : none
+NOTES           : titledset = name of dataset containing title [Default: derived.ddtitles]
+                : name      = name of output
+                : noprint   = sql print/noprint [Default: noprint]
+                :
+                : This macro creates three additional macros
+                : (1) use %mc_adtf to add titles/footnote in a compute statement
+                :     in proc report
+                : (2) use %mc_addtf to add titles/footnotes in the header/footer
+                :     boxes in word
+                : (3) use %mc_adgtf to add titles/footnotes to figures
+                :
+                :             - definition of FLSTYLE mac var amended to include cell top border;
+                :             - ddtitles instead of d_titles
+                :             - MC_GTBTF: setting of FLSTYLE moved to within MC_ADTF, and made
+                :               conditional on BLANK parameter
+                :             - MC_GTBTF: footnote font defaults to same size as general output font
+                :             - MC_ADTF: ADFNOTE replaces ADPAGENO (with a default setting of Y)
+                :             - MC_ADTF: ADFTXT replaces ADPAGETXT
+                :             - MC_ADTF: addition of BLANK parameter to request blank line
+                :               - none / before / after bottom border of table/listing
+                :               - MC_ADTF: addition of GAP parameter, N (default) or Y,
+                :               - for additional blank line between TOP footnotes and housekeeping footnote
+                :             - MC_GTBTF: Additional ORIENT parameter, L (default) or P
+                :             - MC_GTBTF:
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+%macro mc_gtbtf(titledset=raw.ddtitles,
+                name     =,
+                orient   =L,
+                noprint  =noprint);
+
+
+        %let mc_gtbtf_name = %sysfunc( compress( &name, %str( ) ));
+
+
+ %* Set up global macro variables;
+   %global fofsize ntitle nfnote output htfont ftfont;
+
+ %* This macro var is currently set to the the same size as the general output font size, but could be set to
+    one point smaller for footnotes, if required, by choosing the commented out statement instead;
+  %*let fofsize=%eval(&ofsize-1);
+   %let fofsize=&ofsize;
+
+ %* Fonts for TITLE / FOOTNOTE statements in MC_ADDTF / MC_ADGTF;
+   %let htfont  =%str(j=c font="&ofont" h=&ofsize pt );
+   %let ftfont  =%str(j=l font="&ofont" h=&fofsize pt);
+
+ * get titles and footnotes from dataset;
+   proc sql &noprint;
+      %* get orientation
+          - ISH/13Aug09 code commented out, but retained for possible future use
+          - orientation currently passed as macro parameter, rather than read from TOP titles dataset
+            (which mc_titles currently hardcodes to L);
+      %*select trim(compress(label)) into :orient
+          from &titledset
+          where tranwrd(%upcase(start),'_ORIENT','') = "%upcase(&mc_gtbtf_name)";
+      %*put &orient;
+
+      %* get outputname;
+        select trim(compress(label)) into :output
+          from &titledset
+          where tranwrd(%upcase(start),'_BMARK','') = "%upcase(&mc_gtbtf_name)";
+        %put output: &output;
+
+      %* get titles;
+        select count(*) into :ntitle
+          from &titledset
+          where substr(%upcase(start), 1, index(%upcase(start), '_TITLE')-1) = "%upcase(&mc_gtbtf_name)";
+        %put Number of titles: &ntitle;
+
+        %do i=1 %to &ntitle;
+            %global title&i;
+            select  trim(compbl(label)) into :title&i
+              from &titledset
+          %if &i<10 %then %do;
+              where tranwrd(%upcase(start),"_TITLE0&i",'') = "%upcase(&mc_gtbtf_name)";
+          %end;
+          %else %if &i>=10 %then %do;
+              where tranwrd(%upcase(start),"_TITLE&i",'')  = "%upcase(&mc_gtbtf_name)";
+          %end;
+%*            %put Title&i &&title&i;
+        %end;
+
+      %* get footnotes;
+        select count(*) into :nfnote
+          from &titledset
+          where substr(%upcase(start), 1, index(%upcase(start), '_FNOTE')-1) = "%upcase(&mc_gtbtf_name)";
+        %put Number of footnotes: &nfnote;
+
+        %do i=1 %to &nfnote;
+            %global fnote&i;
+            select trim(label) into :fnote&i
+              from &titledset
+            %if &i<10 %then %do;
+              where tranwrd(%upcase(start),"_FNOTE0&i",'') = "%upcase(&mc_gtbtf_name)";
+            %end;
+            %if &i>=10 %then %do;
+              where tranwrd(%upcase(start),"_FNOTE&i",'') = "%upcase(&mc_gtbtf_name)";
+            %end;
+%*            %put Fnote&i &&fnote&i;
+        %end;
+   quit;
+
+   %if %upcase(&orient)=L %then %do;
+        options orientation=landscape ;
+   %end;
+   %else %if %upcase(&orient)=P %then %do;
+        options orientation=portrait ;
+   %end;
+   %else %do;
+       %put WARNING: Orientation must be L or P ;
+   %end;
+   %put Orientation: &orient;
+
+   %* Update output name;
+   data _null_ ;
+     call symput('output', compress("&output")) ;
+   run;
+
+* three macros which use the macro variables created above to add titles/footnotes
+     use %mc_adtf to add titles/footnote in a compute statement in proc report
+     use %mc_addtf to add titles/footnotes in the header/footer boxes in word
+     use %mc_adgtf to add titles/footnotes to figures;
+
+** Add titles/footnote in a compute statement in proc report **;
+%macro mc_adtf(headtxt=, adtitle=, foot=Y, adfnote=Y, adftxt=, lab=NO, split=NO, blank=after, gap=no);
+   %** SPLIT = YES, Proc report is split by a certain variable such as treatment              ***;
+   %** in this case we dont want to apply a border as it is done in proc report               ***;
+   %** LAB=YES, data contains eschapechar ^ so need to use alternative eschapechar @          ***;
+   %** BLANK=AFTER [default], blank line will be placed after bottom border, before footnotes ***;
+   %** BLANK=BEFORE, blank line will be placed after last report line, before bottom border   ***;
+   %** BLANK=NONE, no blank line before or after bottom border                                ***;
+   %** GAP=NO [default], no extra blank line between housekeeping and TOP footnotes           ***;
+   %** GAP=YES, extra blank line between housekeeping and TOP footnotes                       ***;
+   %put **************** RUNNING MC_ADTF MACRO ***********************;
+
+   %* Fonts for title and footnotes compute blocks ;
+        %local hlstyle flstyle;
+        %let hlstyle =%str(/style={font=("&ofont",&ofsize pt, bold)});
+        %if %upcase(&blank) = NONE or %upcase(&blank) = AFTER %then %do;
+	          %if %upcase(&lab)=NO %then %do;
+                %let flstyle =%str(/style={font=("&ofont",&fofsize pt) just=l});
+            %end;
+            %else %do;
+                %let flstyle =%str(/style={font=("&ofont",&fofsize pt) just=l});
+            %end;
+        %end;
+        %else %do;
+            %let flstyle =%str(/style={font=("&ofont",&fofsize pt) just=l});
+        %end;
+   %* Process titles;
+        %if &ntitle ne 0 %then %do;
+                  compute before _page_ &hlstyle;
+            %if %length(&headtxt) %then %do;
+                    line &headtxt;
+            %end;
+            %do i=1 %to &ntitle;
+                    line "&&title&i";
+            %end;
+                    &adtitle;
+  	        %if %upcase(&split)=NO %then %do;
+			          %if %upcase(&lab)=NO %then %do;
+                    line "&border";
+                %end;
+                %else %do;
+                    line "&border1";
+                %end;
+            %end;
+                  endcomp;
+        %end;
+   %* Process footnotes;
+        %if %upcase(&blank) = BEFORE or %upcase(&foot) NE Y %then %do;
+                      compute after page;
+            %if %upcase(&lab)=NO %then %do;
+                        line "&border2";
+            %end;
+            %else %do;
+                        line "&border3";
+            %end;
+                      endcomp;
+        %end;
+        %if %upcase(&foot) = Y %then %do;
+                      compute after _page_ &flstyle;
+            %if &nfnote ne 0 %then %do;
+                %do i=1 %to &nfnote;
+                    %if &i=1 and %upcase(&blank) = AFTER %then %do;
+                        line ' ';
+                    %end;
+                        line "&&fnote&i";
+                %end;
+                %if %upcase(&adfnote)=Y %then %do;
+                    %if %upcase(&gap) = YES %then %do;
+                        line ' ';
+                    %end;
+                        line &adftxt;
+                %end;
+            %end;
+            %else %do;
+              %if %upcase(&adfnote)=Y %then %do;
+                  %if %upcase(&blank) = AFTER %then %do;
+                        line ' ';
+                  %end;
+                        line &adftxt;
+              %end;
+            %end;
+                      endcomp;
+        %end;
+        %put **************** END OF MC_ADTF MACRO ***********************;
+   %mend mc_adtf;
+
+** Add titles/footnotes in the header/footer boxes in word **;
+   %macro mc_addtf(hnfont=&htfont, fnfont=&ftfont, split=NO);
+        *** SPLIT = YES, Proc report is split by a certain variable such as treatment ***;
+        *** which appears as the last title but left alligned                         ***;
+        %put **************** RUNNING MC_ADDTF MACRO ***********************;
+        title4 " ";
+        %do i=1 %to &ntitle;
+              data _null_;
+                  call symput('temp',compbl("&&title&i"));
+              run;
+			    %if &i ne &ntitle %then %do;
+              title%eval(&i+4) &hnfont "&temp";
+			    %end;
+		    	%if &i=&ntitle %then %do;
+            %if "&split" ne "NO" %then %do;  *** left justify last title ***;
+               title%eval(&i+4) j=l font="&ofont" h=&ofsize pt "&temp";
+			      %end;
+			      %else %do;
+               title%eval(&i+4) &hnfont "&temp";
+			      %end;
+			    %end;
+        %end;
+        %do j=1 %to &nfnote;
+              data _null_;
+                  call symput('temp',compbl("&&fnote&j"));
+              run;
+              footnote&j &fnfont "&temp";
+        %end;
+        /*AW 20-feb-2014: causes wrong page numbering so commented out and replaced by
+          standard assigment. */
+        *footnote%eval(&nfnote+1) &fnfont "&mc_addpn_pagetxt";
+
+         footnote%eval(&nfnote+1) &fnfont "#byval2";
+
+        %put **************** END OF MC_ADDTF MACRO ***********************;
+   %mend mc_addtf;
+
+
+   ** Add titles/footnotes to figures **;
+   %macro mc_adgtf(place=, foot=Y);
+        %put **************** RUNNING MC_ADGTF MACRO ***********************;
+        %if &ntitle ne 0 %then %do;
+             %do i=1 %to &ntitle;
+                data _null_;
+                    call symput('temp',compbl("&&title&i"));
+                run;
+                %if %upcase(&place)=I %then %do;
+                    title%eval(&i+3) j=c font=&gfont h=&ogsize pt  "&temp";
+                %end;
+                %else %if %upcase(&place)=O %then %do;
+                    title%eval(&i+3) j=c font=&ofont h=&ogsize pt  "&temp";
+                %end;
+                %else %do;
+                    title%eval(&i+3) j=c font=&gfont h=&ogsize pt  "&temp";
+                %end;
+            %end;
+        %end;
+        %if %upcase(&foot)=Y %then %do;
+            %if fnote ne 0 %then %do;
+                %do i=1 %to &nfnote;
+                    data _null_;
+                        call symput('temp',compbl("&&fnote&i"));
+                    run;
+                  %if %upcase(&place)=I %then %do;
+                    footnote%eval(&i) j=l font=&gfont h=&ogsize pt "&temp";
+                  %end;
+                  %else %if %upcase(&place)=O %then %do;
+                    footnote%eval(&i) j=l font=&ofont h=&ogsize pt "&temp";
+                  %end;
+                  %else %do;
+                    footnote%eval(&i) j=l font=&gfont h=&ogsize pt "&temp";
+                  %end;
+                %end;
+            %end;
+        %end;
+        %put **************** END OF MC_ADGTF MACRO ***********************;
+   %mend mc_adgtf;
+%mend mc_gtbtf;
