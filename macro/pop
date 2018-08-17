@@ -1,0 +1,338 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mc_pop.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/15 02:20:12 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : Macro to calculate population totals
+INPUT FILES    : derived.adsl
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro mc_pop;
+
+/********************PART 1 空腹给药********************/
+
+%global
+  /**随机入组**/
+	rand1_tr    /**受试制剂(T)--参比制剂(R)**/
+	rand1_rt    /**参比制剂(R)--受试制剂(T)**/
+	rand1_gall  /**序列合计**/
+
+  /**全分析集**/
+	fas1_tr     /**受试制剂(T)--参比制剂(R)**/
+	fas1_rt     /**参比制剂(R)--受试制剂(T)**/
+	fas1_gall   /**序列合计**/
+	fas1_t      /**受试制剂(T)**/
+	fas1_r      /**参比制剂(R)**/
+	fas1_tall   /**制剂合计**/
+
+  /**药代动力学分析集**/
+	pk1_t       /**受试制剂(T)**/
+	pk1_r       /**参比制剂(R)**/ 
+	pk1_tall    /**制剂合计**/
+
+  /**生物等效性分析集**/
+	be1_t       /**受试制剂(T)**/
+	be1_r       /**参比制剂(R)**/ 
+	be1_tall    /**制剂合计**/
+
+  /**安全性分析集**/
+	saf1_tr     /**受试制剂(T)--参比制剂(R)**/ 
+	saf1_rt     /**参比制剂(R)--受试制剂(T)**/
+	saf1_gall   /**序列合计**/
+	saf1_t      /**受试制剂(T)**/
+	saf1_r      /**参比制剂(R)**/
+	saf1_tall   /**制剂合计**/
+
+	/**周期一**/
+    saf1_t1    /**受试制剂(T)**/
+	saf1_r1    /**参比制剂(R)**/   
+	saf1_all1  /**制剂合计**/
+
+    /**周期二**/ 
+	saf1_t2    /**受试制剂(T)**/
+	saf1_r2    /**参比制剂(R)**/
+	saf1_all2; /**制剂合计**/
+    
+proc sql noprint;
+
+  /**随机入组**/
+  select count(distinct usubjid) into : rand1_tr from derived.adsl where TRTGRPN=1 and TRTSEQPN=1 and randfl="是";                  /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : rand1_rt from derived.adsl where TRTGRPN=1 and TRTSEQPN=2 and randfl="是";                  /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : rand1_gall from derived.adsl where TRTGRPN=1 and TRTSEQPN^=. and randfl="是";               /**序列合计**/
+
+  /**全分析集**/
+  select count(distinct usubjid) into : fas1_tr from derived.adsl where TRTGRPN=1 and TRTSEQPN=1 and fasfl="是";                    /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : fas1_rt from derived.adsl where TRTGRPN=1 and TRTSEQPN=2 and fasfl="是";                    /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : fas1_gall from derived.adsl where TRTGRPN=1 and TRTSEQPN^=. and fasfl="是";                 /**序列合计**/
+  select count(distinct usubjid) into : fas1_t from derived.adsl where TRTGRPN=1 and (TRT01PN=1 or TRT02PN=1) and fasfl="是";       /**受试制剂(T)**/
+  select count(distinct usubjid) into : fas1_r from derived.adsl where TRTGRPN=1 and (TRT01PN=2 or TRT02PN=2) and fasfl="是";       /**参比制剂(R)**/
+  select count(distinct usubjid) into : fas1_tall from derived.adsl where TRTGRPN=1 and (TRT01PN^=. or TRT02PN^=.) and fasfl="是";  /**制剂合计**/
+
+  /**药代动力学分析集**/
+  select count(distinct usubjid) into : pk1_t from derived.adsl where TRTGRPN=1 and (TRT01AN=1 or TRT02AN=1) and pkfl="是";        /**受试制剂(T)**/
+  select count(distinct usubjid) into : pk1_r from derived.adsl where TRTGRPN=1 and (TRT01AN=2 or TRT02AN=2) and pkfl="是";        /**参比制剂(R)**/
+  select count(distinct usubjid) into : pk1_tall from derived.adsl where TRTGRPN=1 and (TRT01AN^=. or TRT02AN^=.) and pkfl="是";   /**制剂合计**/
+
+  /**生物等效性分析集**/
+  select count(distinct usubjid) into : be1_t from derived.adsl where TRTGRPN=1 and (TRT01AN=1 or TRT02AN=1) and befl="是";        /**受试制剂(T)**/
+  select count(distinct usubjid) into : be1_r from derived.adsl where TRTGRPN=1 and (TRT01AN=2 or TRT02AN=2) and befl="是";        /**参比制剂(R)**/
+  select count(distinct usubjid) into : be1_tall from derived.adsl where TRTGRPN=1 and (TRT01AN^=. or TRT02AN^=.) and befl="是";   /**制剂合计**/
+
+  /**安全性分析集**/
+  select count(distinct usubjid) into : saf1_tr from derived.adsl where TRTGRPN=1 and TRTSEQAN=1 and saffl="是";                    /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : saf1_rt from derived.adsl where TRTGRPN=1 and TRTSEQAN=2 and saffl="是";                    /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : saf1_gall from derived.adsl where TRTGRPN=1 and TRTSEQAN^=. and saffl="是";                 /**序列合计**/
+  select count(distinct usubjid) into : saf1_t from derived.adsl where TRTGRPN=1 and (TRT01AN=1 or TRT02AN=1) and saffl="是";       /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf1_r from derived.adsl where TRTGRPN=1 and (TRT01AN=2 or TRT02AN=2) and saffl="是";       /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf1_tall from derived.adsl where TRTGRPN=1 and (TRT01AN^=. or TRT02AN^=.) and saffl="是";  /**制剂合计**/
+  select count(distinct usubjid) into : saf1_t1 from derived.adsl where TRTGRPN=1 and TRT01AN=1 and saffl="是";                     /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf1_r1 from derived.adsl where TRTGRPN=1 and TRT01AN=2 and saffl="是";                     /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf1_all1 from derived.adsl where TRTGRPN=1 and TRT01AN^=. and saffl="是";                  /**制剂合计**/
+  select count(distinct usubjid) into : saf1_t2 from derived.adsl where TRTGRPN=1 and TRT02AN=1 and saffl="是";                     /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf1_r2 from derived.adsl where TRTGRPN=1 and TRT02AN=2 and saffl="是";                     /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf1_all2 from derived.adsl where TRTGRPN=1 and TRT02AN^=. and saffl="是";                  /**制剂合计**/
+quit;
+ 
+  /**随机入组**/
+%let rand1_tr=&rand1_tr; 
+%let rand1_rt=&rand1_rt; 
+%let rand1_gall=&rand1_gall;
+
+  /**全分析集**/
+%let fas1_tr=&fas1_tr; 
+%let fas1_rt=&fas1_rt; 
+%let fas1_gall=&fas1_gall;
+%let fas1_t=&fas1_t; 
+%let fas1_r=&fas1_r; 
+%let fas1_tall=&fas1_tall;
+
+  /**药代动力学分析集**/
+%let pk1_t=&pk1_t; 
+%let pk1_r=&pk1_r; 
+%let pk1_tall=&pk1_tall;
+
+  /**生物等效性分析集**/
+%let be1_t=&be1_t; 
+%let be1_r=&be1_r; 
+%let be1_tall=&be1_tall;
+
+  /**安全性分析集**/
+%let saf1_tr=&saf1_tr; 
+%let saf1_rt=&saf1_rt; 
+%let saf1_gall=&saf1_gall;
+%let saf1_t=&saf1_t; 
+%let saf1_r=&saf1_r; 
+%let saf1_tall=&saf1_tall;
+%let saf1_t1=&saf1_t1; 
+%let saf1_r1=&saf1_r1; 
+%let saf1_all1=&saf1_all1;
+%let saf1_t2=&saf1_t2; 
+%let saf1_r2=&saf1_r2; 
+%let saf1_all2=&saf1_all2;
+
+  /**随机入组**/
+%put PART 1: Randomized subject T-R sequence population --- &rand1_tr;
+%put PART 1: Randomized subject R-T sequence population --- &rand1_rt;
+%put PART 1: Randomized subject all sequence population --- &rand1_gall;
+
+  /**全分析集**/
+%put PART 1: Full Analysis subject T-R sequence population  --- &fas1_tr;
+%put PART 1: Full Analysis subject R-T sequence population --- &fas1_rt;
+%put PART 1: Full Analysis subject all sequence population --- &fas1_gall;
+%put PART 1: Full Analysis subject T drug population  --- &fas1_t;
+%put PART 1: Full Analysis subject R drug population --- &fas1_r;
+%put PART 1: Full Analysis subject all drug population --- &fas1_tall;
+
+  /**药代动力学分析集**/
+%put PART 1: PK Analysis subject T drug population  --- &pk1_t;
+%put PART 1: PK Analysis subject R drug population --- &pk1_r;
+%put PART 1: PK Analysis subject all drug population --- &pk1_tall;
+
+  /**生物等效性分析集**/
+%put PART 1: BE Analysis subject T drug population  --- &be1_t;
+%put PART 1: BE Analysis subject R drug population --- &be1_r;
+%put PART 1: BE Analysis subject all drug population --- &be1_tall;
+
+  /**安全性分析集**/
+%put PART 1: safty Analysis subject T-R sequence population --- &saf1_tr;
+%put PART 1: safty Analysis subject R-T sequence population --- &saf1_rt;
+%put PART 1: safty Analysis subject all sequence population --- &saf1_gall;
+%put PART 1: safty Analysis subject T drug population --- &saf1_t;
+%put PART 1: safty Analysis subject R rug population --- &saf1_r;
+%put PART 1: safty Analysis subject all drug population --- &saf1_tall;
+%put PART 1 aperiod 1: safty Analysis subject T drug population --- &saf1_t1;
+%put PART 1 aperiod 1: safty Analysis subject R drug population --- &saf1_r1;
+%put PART 1 aperiod 1: safty Analysis subject all drug population --- &saf1_all1;
+%put PART 1 aperiod 2: safty Analysis subject T drug population --- &saf1_t2;
+%put PART 1 aperiod 2: safty Analysis subject R drug population --- &saf1_r2;
+%put PART 1 aperiod 2: safty Analysis subject all drug population --- &saf1_all2;
+
+
+/********************PART 2 餐后给药********************/
+
+%global
+  /**随机入组**/
+	rand2_tr    /**受试制剂(T)--参比制剂(R)**/
+	rand2_rt    /**参比制剂(R)--受试制剂(T)**/
+	rand2_gall  /**序列合计**/
+
+  /**全分析集**/
+	fas2_tr     /**受试制剂(T)--参比制剂(R)**/
+	fas2_rt     /**参比制剂(R)--受试制剂(T)**/
+	fas2_gall   /**序列合计**/
+	fas2_t      /**受试制剂(T)**/
+	fas2_r      /**参比制剂(R)**/
+	fas2_tall   /**制剂合计**/
+
+  /**药代动力学分析集**/
+	pk2_t       /**受试制剂(T)**/
+	pk2_r       /**参比制剂(R)**/ 
+	pk2_tall    /**制剂合计**/
+
+  /**生物等效性分析集**/
+	be2_t       /**受试制剂(T)**/
+	be2_r       /**参比制剂(R)**/ 
+	be2_tall    /**制剂合计**/
+
+  /**安全性分析集**/
+	saf2_tr     /**受试制剂(T)--参比制剂(R)**/ 
+	saf2_rt     /**参比制剂(R)--受试制剂(T)**/
+	saf2_gall   /**序列合计**/
+	saf2_t      /**受试制剂(T)**/
+	saf2_r      /**参比制剂(R)**/
+	saf2_tall   /**制剂合计**/
+
+	/**周期一**/
+    saf2_t1    /**受试制剂(T)**/
+	saf2_r1    /**参比制剂(R)**/   
+	saf2_all1  /**制剂合计**/
+
+    /**周期二**/ 
+	saf2_t2    /**受试制剂(T)**/
+	saf2_r2    /**参比制剂(R)**/
+	saf2_all2; /**制剂合计**/
+    
+proc sql noprint;
+
+  /**随机入组**/
+  select count(distinct usubjid) into : rand2_tr from derived.adsl where TRTGRPN=2 and TRTSEQPN=1 and randfl="是";                  /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : rand2_rt from derived.adsl where TRTGRPN=2 and TRTSEQPN=2 and randfl="是";                  /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : rand2_gall from derived.adsl where TRTGRPN=2 and TRTSEQPN^=. and randfl="是";               /**序列合计**/
+
+  /**全分析集**/
+  select count(distinct usubjid) into : fas2_tr from derived.adsl where TRTGRPN=2 and TRTSEQPN=1 and fasfl="是";                    /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : fas2_rt from derived.adsl where TRTGRPN=2 and TRTSEQPN=2 and fasfl="是";                    /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : fas2_gall from derived.adsl where TRTGRPN=2 and TRTSEQPN^=. and fasfl="是";                 /**序列合计**/
+  select count(distinct usubjid) into : fas2_t from derived.adsl where TRTGRPN=2 and (TRT01PN=1 or TRT02PN=1) and fasfl="是";       /**受试制剂(T)**/
+  select count(distinct usubjid) into : fas2_r from derived.adsl where TRTGRPN=2 and (TRT01PN=2 or TRT02PN=2) and fasfl="是";       /**参比制剂(R)**/
+  select count(distinct usubjid) into : fas2_tall from derived.adsl where TRTGRPN=2 and (TRT01PN^=. or TRT02PN^=.) and fasfl="是";  /**制剂合计**/
+
+  /**药代动力学分析集**/
+  select count(distinct usubjid) into : pk2_t from derived.adsl where TRTGRPN=2 and (TRT01AN=1 or TRT02AN=1) and pkfl="是";        /**受试制剂(T)**/
+  select count(distinct usubjid) into : pk2_r from derived.adsl where TRTGRPN=2 and (TRT01AN=2 or TRT02AN=2) and pkfl="是";        /**参比制剂(R)**/
+  select count(distinct usubjid) into : pk2_tall from derived.adsl where TRTGRPN=2 and (TRT01AN^=. or TRT02AN^=.) and pkfl="是";   /**制剂合计**/
+
+  /**生物等效性分析集**/
+  select count(distinct usubjid) into : be2_t from derived.adsl where TRTGRPN=2 and (TRT01AN=1 or TRT02AN=1) and befl="是";        /**受试制剂(T)**/
+  select count(distinct usubjid) into : be2_r from derived.adsl where TRTGRPN=2 and (TRT01AN=2 or TRT02AN=2) and befl="是";        /**参比制剂(R)**/
+  select count(distinct usubjid) into : be2_tall from derived.adsl where TRTGRPN=2 and (TRT01AN^=. or TRT02AN^=.) and befl="是";   /**制剂合计**/
+
+  /**安全性分析集**/
+  select count(distinct usubjid) into : saf2_tr from derived.adsl where TRTGRPN=2 and TRTSEQAN=1 and saffl="是";                    /**受试制剂(T)--参比制剂(R)**/
+  select count(distinct usubjid) into : saf2_rt from derived.adsl where TRTGRPN=2 and TRTSEQAN=2 and saffl="是";                    /**参比制剂(R)--受试制剂(T)**/
+  select count(distinct usubjid) into : saf2_gall from derived.adsl where TRTGRPN=2 and TRTSEQAN^=. and saffl="是";                 /**序列合计**/
+  select count(distinct usubjid) into : saf2_t from derived.adsl where TRTGRPN=2 and (TRT01AN=1 or TRT02AN=1) and saffl="是";       /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf2_r from derived.adsl where TRTGRPN=2 and (TRT01AN=2 or TRT02AN=2) and saffl="是";       /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf2_tall from derived.adsl where TRTGRPN=2 and (TRT01AN^=. or TRT02AN^=.) and saffl="是";  /**制剂合计**/
+  select count(distinct usubjid) into : saf2_t1 from derived.adsl where TRTGRPN=2 and TRT01AN=1 and saffl="是";                     /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf2_r1 from derived.adsl where TRTGRPN=2 and TRT01AN=2 and saffl="是";                     /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf2_all1 from derived.adsl where TRTGRPN=2 and TRT01AN^=. and saffl="是";                  /**制剂合计**/
+  select count(distinct usubjid) into : saf2_t2 from derived.adsl where TRTGRPN=2 and TRT02AN=1 and saffl="是";                     /**受试制剂(T)**/
+  select count(distinct usubjid) into : saf2_r2 from derived.adsl where TRTGRPN=2 and TRT02AN=2 and saffl="是";                     /**参比制剂(R)**/
+  select count(distinct usubjid) into : saf2_all2 from derived.adsl where TRTGRPN=2 and TRT02AN^=. and saffl="是";                  /**制剂合计**/
+quit;
+ 
+  /**随机入组**/
+%let rand2_tr=&rand2_tr; 
+%let rand2_rt=&rand2_rt; 
+%let rand2_gall=&rand2_gall;
+
+  /**全分析集**/
+%let fas2_tr=&fas2_tr; 
+%let fas2_rt=&fas2_rt; 
+%let fas2_gall=&fas2_gall;
+%let fas2_t=&fas2_t; 
+%let fas2_r=&fas2_r; 
+%let fas2_tall=&fas2_tall;
+
+  /**药代动力学分析集**/
+%let pk2_t=&pk2_t; 
+%let pk2_r=&pk2_r; 
+%let pk2_tall=&pk2_tall;
+
+  /**生物等效性分析集**/
+%let be2_t=&be2_t; 
+%let be2_r=&be2_r; 
+%let be2_tall=&be2_tall;
+
+  /**安全性分析集**/
+%let saf2_tr=&saf2_tr; 
+%let saf2_rt=&saf2_rt; 
+%let saf2_gall=&saf2_gall;
+%let saf2_t=&saf2_t; 
+%let saf2_r=&saf2_r; 
+%let saf2_tall=&saf2_tall;
+%let saf2_t1=&saf2_t1; 
+%let saf2_r1=&saf2_r1; 
+%let saf2_all1=&saf2_all1;
+%let saf2_t2=&saf2_t2; 
+%let saf2_r2=&saf2_r2; 
+%let saf2_all2=&saf2_all2;
+
+  /**随机入组**/
+%put PART 2: Randomized subject T-R sequence population --- &rand2_tr;
+%put PART 2: Randomized subject R-T sequence population --- &rand2_rt;
+%put PART 2: Randomized subject all sequence population --- &rand2_gall;
+
+  /**全分析集**/
+%put PART 2: Full Analysis subject T-R sequence population  --- &fas2_tr;
+%put PART 2: Full Analysis subject R-T sequence population --- &fas2_rt;
+%put PART 2: Full Analysis subject all sequence population --- &fas2_gall;
+%put PART 2: Full Analysis subject T drug population  --- &fas2_t;
+%put PART 2: Full Analysis subject R drug population --- &fas2_r;
+%put PART 2: Full Analysis subject all drug population --- &fas2_tall;
+
+  /**药代动力学分析集**/
+%put PART 2: PK Analysis subject T drug population  --- &pk2_t;
+%put PART 2: PK Analysis subject R drug population --- &pk2_r;
+%put PART 2: PK Analysis subject all drug population --- &pk2_tall;
+
+  /**生物等效性分析集**/
+%put PART 2: BE Analysis subject T drug population  --- &be2_t;
+%put PART 2: BE Analysis subject R drug population --- &be2_r;
+%put PART 2: BE Analysis subject all drug population --- &be2_tall;
+
+  /**安全性分析集**/
+%put PART 2: safty Analysis subject T-R sequence population --- &saf2_tr;
+%put PART 2: safty Analysis subject R-T sequence population --- &saf2_rt;
+%put PART 2: safty Analysis subject all sequence population --- &saf2_gall;
+%put PART 2: safty Analysis subject T drug population --- &saf2_t;
+%put PART 2: safty Analysis subject R drug population --- &saf2_r;
+%put PART 2: safty Analysis subject all drug population --- &saf2_tall;
+%put PART 2 aperiod 1: safty Analysis subject T drug population --- &saf2_t1;
+%put PART 2 aperiod 1: safty Analysis subject R drug population --- &saf2_r1;
+%put PART 2 aperiod 1: safty Analysis subject all drug population --- &saf2_all1;
+%put PART 2 aperiod 2: safty Analysis subject T drug population --- &saf2_t2;
+%put PART 2 aperiod 2: safty Analysis subject R drug population --- &saf2_r2;
+%put PART 2 aperiod 2: safty Analysis subject all drug population --- &saf2_all2;
+
+%mend mc_pop;
+
+%mc_pop;
