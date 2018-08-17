@@ -1,0 +1,437 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adsl.sas,v $
+REV/REV        : $Revision: 1.7 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/15 09:57:00 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - - 
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : to derive ADSL
+INPUT FILES    :
+OUTPUT FILES   : derived.adsl
+MACROS USED    : %mc_clrup %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=adsl;
+
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+proc sql noprint;
+  select distinct ITMNAME into: keepvar separated by ' ' 
+  from derived.adms where upcase(MEMNAME) = 'ADSL';
+quit;
+
+%put &keepvar.;
+
+****demographic information;
+data dm;
+length STUDYID $18 USUBJID $30 SUBJID $30 RACE $12 SITENAM $100 SITEID $50;
+  set raw.dm(drop=STUDYID SITEID);
+	STUDYID=strip(PROJECT);
+  SUBJID=strip(SUBJECT);
+	USUBJID=strip(PROJECT)||'-'||strip(SUBJID);
+  SITENAM=strip(SITE);
+	SITEID=strip(SITENUMBER);
+  BRTHDTC=put(input(compress(BRTHDAT_RAW),date9.),is8601da.);
+  if AGE^=. then AGEU='周岁';
+  if SEX='男' then SEXN=1;
+  else if SEX='女' then SEXN=2;
+
+	if RACE='汉族' then RACEN=1;
+  else if RACE='其他' then do;RACE=strip(RACEOTH);RACEN=2;end;
+	format RACE ;
+	informat RACE;
+  keep STUDYID SUBJECT SUBJID USUBJID SITENAM SITEID AGE BRTHDTC AGEU SEX SEXN RACE
+  RACEN RACEOTH;
+run;
+
+***********populate all the flags********;
+*****IC***;
+data ic;
+  set raw.ic;
+	if ICDAT_RAW^='' then do;
+	  RFICDTC=put(input(compress(ICDAT_RAW),date9.),is8601da.);
+    ENRLFL='是';
+		keep SUBJECT RFICDTC ENRLFL;
+		output;
+  end;
+run;
+
+****RM***;
+data rm;
+length RANDNUM $9 TRT01P TRT02P $40 TRTSEQP $30 TRTGRP $20;
+  set raw.rm;
+	if RMYN='是' then do;
+	  TRTGRP=RMTYPE;
+		TRTGRPN=RMTYPE_STD;
+	  RANDDTC=put(input(compress(RMDAT_RAW),date9.),is8601da.);
+    RANDFL='是';
+    RANDNUM=RMREFID;
+    if RMGROUP='A组(TR)' then do;
+      TRT01P='受试制剂';
+      TRT02P='参比制剂';
+			if TRT01P='受试制剂' and TRT02P='参比制剂' and TRTGRP='空腹给药' then do;
+	      TRTSEQP='受试制剂-参比制剂';
+				TRTSEQPN=1;
+			end;
+	    if TRT01P='参比制剂' and TRT02P='受试制剂' and TRTGRP='空腹给药' then do;
+				TRTSEQP='参比制剂-受试制剂';
+				TRTSEQPN=2;
+			end;
+			if TRT01P='受试制剂' and TRT02P='参比制剂' and TRTGRP='餐后给药' then do;
+	      TRTSEQP='受试制剂-参比制剂';
+				TRTSEQPN=1;
+			end;
+	    if TRT01P='参比制剂' and TRT02P='受试制剂' and TRTGRP='餐后给药' then do;
+				TRTSEQP='参比制剂-受试制剂';
+				TRTSEQPN=2;
+			end;
+    end;
+
+    if RMGROUP='B组(RT)' then do;
+		  TRT01P='参比制剂';	
+			TRT02P='受试制剂';
+      if TRT01P='受试制剂' and TRT02P='参比制剂' and TRTGRP='空腹给药' then do;
+      TRTSEQP='受试制剂-参比制剂';
+			TRTSEQPN=1;
+			end;
+	    if TRT01P='参比制剂' and TRT02P='受试制剂' and TRTGRP='空腹给药' then do;
+				TRTSEQP='参比制剂-受试制剂';
+				TRTSEQPN=2;
+			end;
+      if TRT01P='受试制剂' and TRT02P='参比制剂' and TRTGRP='餐后给药' then do;
+      TRTSEQP='受试制剂-参比制剂';
+			TRTSEQPN=1;
+			end;
+	    if TRT01P='参比制剂' and TRT02P='受试制剂' and TRTGRP='餐后给药' then do;
+				TRTSEQP='参比制剂-受试制剂';
+				TRTSEQPN=2;
+			end;
+    end;
+		if TRT01P='受试制剂' then TRT01PN=1;
+		if TRT01P='参比制剂' then TRT01PN=2;
+		if TRT02P='受试制剂' then TRT02PN=1;
+		if TRT02P='参比制剂' then TRT02PN=2;
+		keep SUBJECT RANDDTC RANDFL RANDNUM TRTGRP TRTGRPN RMGROUP TRT01P TRT02P TRT01PN TRT02PN 
+    TRTSEQP TRTSEQPN;
+		output;
+	end;
+run;
+
+****Screen failure***;
+data sf;
+length DSFREAS $200 EOSTU $30;
+  set raw.sf;
+	if SFYN='是' then do;
+	  SFAILFL='是';
+    COMPFL='否';
+    DSFREAS=SFRESN;
+    DSFREASN=SFRESN_STD;
+		if SFRESN='其他' then DSFREAS='其他，'||strip(SFPSF);
+		EOSTU='筛选失败';
+	  DSCPDTC=put(input(compress(SFDAT_RAW),date9.),is8601da.);
+    keep SUBJECT SFAILFL DSFREAS DSFREASN EOSTU COMPFL DSCPDTC;
+	  output;
+	end;
+run;
+
+***complete flag***;
+data ds;
+length DDSREAS DSREAS $200 EOSTU $30;
+  set raw.ds;
+	if DSCOMPYN='是' then do;
+    COMPFL='是';
+	  DSCPDTC=put(input(compress(DSSTDAT_RAW),date9.),is8601da.);
+		EOSTU='完成试验';
+	end;
+	if DSCOMPYN='否' then do;
+    COMPFL='否';
+    DSCPDTC=put(input(compress(DSSTDAT_RAW),date9.),is8601da.);
+    if DSDECOD^='' and DSOTHSPC^='' then DDSREAS=strip(DSDECOD)||': '||strip(DSOTHSPC);
+    if DSDECOD^='' and DSOTHSPC='' then DDSREAS=strip(DSDECOD);
+		DSREAS=strip(DSDECOD);
+		DSREASN=DSDECOD_STD;
+		EOSTU='提前退出';
+	end;
+  keep SUBJECT COMPFL DSCPDTC EOSTU DDSREAS DSREAS DSREASN;
+run;
+
+proc sort data=raw.ic(keep=subject icdat_raw) out=icd;
+    by subject;
+run;
+
+proc sort data=raw.su out=_su;
+    by subject;
+run;
+
+data su;
+    length DRKHIS SMKHIS $3 DRKDU SMKDU $10 DRKTXT SMKTXT SMKTXTDES DRKTXTDES $200;
+    merge _su(in=a) icd;
+    by subject;
+	if a;
+
+	icfdt=intnx('month',input(compress(icdat_raw),date9.),0,'b');
+	if cmiss(sustyr1,sustmo1)=0 then smksdtc=strip(sustyr1)||'-'||strip(sustmo1)||'-01';
+	if cmiss(suenyr1,suenmo1)=0 then smkedtc=strip(suenyr1)||'-'||strip(suenmo1)||'-01';
+	if cmiss(sustyr2,sustmo2)=0 then drksdtc=strip(sustyr2)||'-'||strip(sustmo2)||'-01';
+	if cmiss(suenyr2,suenmo2)=0 then drkedtc=strip(suenyr2)||'-'||strip(suenmo2)||'-01';
+
+	if SUDSTXT1='戒烟' then do;
+	  if cmiss(smksdtc, smkedtc)=0 then do;
+        if index(smksdtc,'UNK')=0 and index(smkedtc,'UNK')=0 then smkdu=strip(put(ceil((input(smkedtc,yymmdd10.)-input(smksdtc,yymmdd10.))/365.25),best.));
+        else do;
+          if sustyr1^='UNK' and suenyr1^='UNK' then smkdu=strip(put(input(suenyr1,best.)-input(sustyr1,best.),best.));
+		  else smkdu='';
+	    end;
+	  end;
+	end;
+	else do;
+	  if smksdtc^='' and icfdt^=. then do;
+        if index(smksdtc,'UNK')=0 then smkdu=strip(put(ceil((icfdt-input(smksdtc,yymmdd10.))/365.25),best.));
+        else do;
+          if sustyr1^='UNK' then smkdu=strip(put(input(substr(put(icfdt,yymmdd10.),1,4),best.)-input(sustyr1,best.),best.));
+		  else smkdu='';
+	    end;
+	  end;
+	end;
+
+	if SUDSTXT2='戒酒' then do;
+	  if cmiss(drksdtc, drkedtc)=0 then do;
+        if index(drksdtc,'UNK')=0 and index(drkedtc,'UNK')=0 then drkdu=strip(put(ceil((input(drkedtc,yymmdd10.)-input(drksdtc,yymmdd10.))/365.25),best.));
+        else do;
+          if sustyr2^='UNK' and suenyr2^='UNK' then drkdu=strip(put(input(suenyr2,best.)-input(sustyr1,best.),best.));
+		  else drkdu='';
+	    end;
+	  end;
+	end;
+	else do;
+	  if drksdtc^='' and icfdt^=. then do;
+        if index(drksdtc,'UNK')=0 then drkdu=strip(put(ceil((icfdt-input(drksdtc,yymmdd10.))/365.25),best.));
+        else do;
+          if sustyr2^='UNK' then drkdu=strip(put(input(substr(put(icfdt,yymmdd10.),1,4),best.)-input(sustyr2,best.),best.));
+		  else drkdu='';
+		end;
+	  end;
+	end;
+
+	if SUNCF1='是' then SMKHIS='有';
+	else if SUNCF1='否' then SMKHIS='无';
+
+	SMKTXT=SUDSTXT1;
+	if SMKHIS='有' then SMKTXTDES=strip(SMKHIS)||'/'||strip(SMKTXT)||'/'||strip(SMKDU);
+	else SMKTXTDES=strip(SMKHIS);
+
+	if SUNCF2='是' then DRKHIS='有';
+	else if SUNCF2='否' then DRKHIS='无';
+
+    DRKTXT=SUDSTXT2;
+    if DRKHIS='有' then DRKTXTDES=strip(DRKHIS)||'/'||strip(DRKTXT)||'/'||strip(DRKDU);
+	else DRKTXTDES=strip(DRKHIS);
+
+    keep SUBJECT SMKHIS SMKTXT SMKTXTDES DRKHIS DRKTXT DRKTXTDES;
+run;
+
+proc sort data=su;by SUBJECT descending SMKHIS;run;
+proc sort data=su out=su_1 nodupkey;by SUBJECT;run;
+
+proc sort data=raw.mh2 out=mh2;by SUBJECT SGHTYPE;run;
+proc transpose data=mh2 out=mh_t1 prefix=VAL;
+  by SUBJECT;
+  id SGHTYPE_STD;
+	var MH2YN;
+run;
+
+proc sort data=raw.mh2 out=mh2;by SUBJECT SGHTYPE;run;
+proc transpose data=mh2 out=mh_t2 prefix=VAR;
+  by SUBJECT;
+  id SGHTYPE_STD;
+	var MH2DESC;
+run;
+
+data mh2_1;
+length COL1 COL2 COL3 COL4 COL5 COL6 COL7 $200 MHTERMS $600;
+  merge mh_t1 mh_t2;
+	by SUBJECT;	
+	if VAL1='无' then COL1='用药史:'||strip(VAL1);
+	if VAL2='无' then COL2='过敏史:'||strip(VAL2);
+	if VAL3='无' then COL3='家族病史:'||strip(VAL3);
+	if VAL4='无' then COL4='临床试验史:'||strip(VAL4);
+	if VAL5='无' then COL5='输血/献血史:'||strip(VAL5);
+	if VAL6='无' then COL6='药物滥用史:'||strip(VAL6);
+	if VAL7='无' then COL7='静脉穿刺耐受情况:'||strip(VAL7);
+
+	if VAL1='有' then COL1='用药史:'||strip(VAR1);
+	if VAL2='有' then COL2='过敏史:'||strip(VAR2);
+	if VAL3='有' then COL3='家族病史:'||strip(VAR3);
+	if VAL4='有' then COL4='临床试验史:'||strip(VAR4);
+	if VAL5='有' then COL5='输血/献血史:'||strip(VAR5);
+	if VAL6='有' then COL6='药物滥用史:'||strip(VAR6);
+	if VAL7='有' then COL7='静脉穿刺耐受情况:'||strip(VAR7);
+	MHTERMS=catx('; ',of COL1-COL7);
+
+    %macro splitvar(var=, varname=, max_vars=);  
+
+      %do j = 1 %to &max_vars; 
+        attrib &varname%eval(&j) length=$200;   
+        do ctr = 1 to 200;
+          if length(&var)<=200 then do;
+            &varname%eval(&j)=strip(&var);
+            &var = '';
+            ctr = 200;
+          end;
+          else if length(&var)>200 then do;
+            if compress(substr(&var, 202-ctr, 1), '','kg') ne '' and substr(&var, 202-ctr, 1) ne ' ' and substr(&var, 203-ctr, 1) ne ' ' then do;   
+              &varname%eval(&j)=substr(&var,1,201-ctr+1);
+              &var = substr(&var., 202-ctr+1);
+              ctr = 200;
+            end;
+          end;
+        end;
+      %end;
+
+      drop ctr ;
+
+    %mend splitvar;
+
+    %splitvar(var=MHTERMS, varname=MHTERM, max_vars=2);
+
+	rename MHTERM1=MHTERM MHTERM2=MHTERM1;
+run;
+
+proc sort data=mh2_1;by SUBJECT;run;
+
+data pimh;
+length LACTPD MENOPS $10 MSDMSC PGDEABR $50 PREGHIS $10;
+  set raw.pimh;
+  MHDTC=put(input(compress(MSLDAT_RAW),date9.),is8601da.);
+	LACTPD=ICYN;
+	MENOPS=MSYN;
+	MSDMSC=catx('/',MSPD,MHDTC,MSRY);
+	PREGHIS=PGHYN;
+	PGDEABR=catx('/',PGANB,DETIM,ABRTIM);
+	keep SUBJECT LACTPD MENOPS MSDMSC PREGHIS PGDEABR;
+run;
+proc sort data=pimh;by SUBJECT;run;
+
+*****height weight BMI***;
+data hw;
+  set raw.hw;
+  if HWPERF='是' then do;
+	  HEIGHTU='cm';
+    WEIGHTU='kg';
+		BMIU='kg/m^2';
+		HEIGHTBL=HEIGHT;
+		WEIGHTBL=WEIGHT;
+		BMIBL=BMI;
+    keep SUBJECT HEIGHTBL WEIGHTBL BMIBL HEIGHTU WEIGHTU BMIU;
+	  output;
+	end;
+run;
+
+****ex***;
+proc sort data=raw.ex out=ex;by SUBJECT;run;
+data ex_1;
+length TR01SDTC TR01EDTC TR02SDTC TR02EDTC $19 TRT01A TRT02A $40 TRTSEQA $30;
+  merge ex(in=a where=(EXYN='是' and index(FOLDER, 'C1D1')) 
+        rename=(EXTYPE=EXTYPE1 EXSTDAT_RAW=EXSTDAT_RAW1 EXTIM=EXTIM1))
+        ex(in=b where=(EXYN='是' and index(FOLDER, 'C2D15')) 
+        rename=(EXTYPE=EXTYPE2 EXSTDAT_RAW=EXSTDAT_RAW2 EXTIM=EXTIM2));
+	by SUBJECT;
+  if a then TRT01A=strip(EXTYPE1);
+  if b then TRT02A=strip(EXTYPE2);
+	if TRT01A='受试制剂' then TRT01AN=1;
+	if TRT01A='参比制剂' then TRT01AN=2;
+	if TRT02A='受试制剂' then TRT02AN=1;
+	if TRT02A='参比制剂' then TRT02AN=2;
+	if TRT01A='受试制剂' then do;
+		TRTSEQA='受试制剂-参比制剂';
+		TRTSEQAN=1;
+	end;            
+	if TRT01A='参比制剂' then do;
+		TRTSEQA='参比制剂-受试制剂';
+		TRTSEQAN=2;
+	end;
+	if length(scan(strip(EXTIM1),1,':'))=1 then EXTIM1='0'||EXTIM1;
+	if length(scan(strip(EXTIM2),1,':'))=1 and EXTIM2 ne "" then EXTIM2='0'||EXTIM2;
+  if EXTIM1^='' then TR01SDTC=put(input(compress(EXSTDAT_RAW1),date9.),is8601da.)||'T'||EXTIM1;
+  if EXTIM1=''  then TR01SDTC=put(input(compress(EXSTDAT_RAW1),date9.),is8601da.);
+	TR01EDTC=TR01SDTC;
+
+  if EXTIM2^='' then TR02SDTC=put(input(compress(EXSTDAT_RAW2),date9.),is8601da.)||'T'||EXTIM2;
+  if EXTIM2='' then TR02SDTC=put(input(compress(EXSTDAT_RAW2),date9.),is8601da.);
+	TR02EDTC=TR02SDTC;
+
+  TR01SDT=input(compress(EXSTDAT_RAW1),??date9.);
+	TR01EDT=TR01SDT;
+	TR01STM=input(compress(EXTIM1),??time8.);
+	TR01ETM=input(compress(EXTIM1),??time8.);
+  TR02SDT=input(compress(EXSTDAT_RAW2),??date9.);
+	TR02EDT=TR02SDT;
+	TR02STM=input(compress(EXTIM2),??time8.);
+	TR02ETM=input(compress(EXTIM2),??time8.);
+	format TR01SDT TR02SDT TR01EDT TR02EDT is8601da. TR01STM TR02STM TR01ETM TR02ETM time8.;
+
+	keep SUBJECT TRT01A TRT02A TRT01AN TRT02AN TRTSEQA TRTSEQAN
+  EXSTDAT_RAW1 EXSTDAT_RAW2 EXTIM1 EXTIM2 TR01SDT TR02SDT TR01EDT TR02EDT TR01SDTC 
+  TR01EDTC TR02SDTC TR02EDTC TR01STM TR02STM TR01ETM TR02ETM;
+run;
+
+data subj;
+	length SCRNUM $30;
+  set raw.subj;
+	where SUBJECT^='';
+	SCRNUM=SUBJID;
+	keep SUBJECT SCRNUM;
+run;
+
+proc sort data=dm;by SUBJECT;run;
+proc sort data=rm;by SUBJECT;run;
+proc sort data=ic;by SUBJECT;run;
+proc sort data=sf;by SUBJECT;run;
+proc sort data=ds;by SUBJECT;run;
+proc sort data=su;by SUBJECT;run;
+proc sort data=mh2_1;by SUBJECT;run;
+proc sort data=hw;by SUBJECT;run;
+proc sort data=ex_1;by SUBJECT;run;
+proc sort data=subj;by SUBJECT;run;
+data final;
+length BEFL PKFL $3;
+  merge dm(in=a) ic rm ds sf su_1 mh2_1 hw ex_1(in=b) subj(in=c) pimh;
+  by SUBJECT;
+	if a and c;
+	if RFICDTC^='' then ENRLFL='是';
+	else ENRLFL='否';
+  if c then SCRNFL='是';
+  if c and b then do;FASFL='是';SAFFL='是';end;
+	if FASFL='' then FASFL='否';
+	if SAFFL='' then SAFFL='否';
+	if RANDFL='' then RANDFL='否';
+	if RANDFL='' then RANDFL='否';
+	if SFAILFL='' then SFAILFL='否';
+	
+	if RANDFL='是' and (TRT01A^='' or TRT02A^='')then PKFL='是';
+	if RANDFL='是' and (TRT01A^='' and TRT02A^='')then BEFL='是';
+	if PKFL='' then PKFL='否';
+	if BEFL='' then BEFL='否';
+	DSSFREAS=catx(',',DSFREAS,DDSREAS);
+	If index(SCRNUM,'S-K-LPT-')  then do;TRTGRP='空腹给药';TRTGRPN=1;end;
+	else if index(SCRNUM,'S-C-LPT-')  then do;TRTGRP='餐后给药';TRTGRPN=2;end;
+	keep &keepvar.;
+run;
+
+%mattrib (inds=final, outds=final_1, dsname=ADSL, ddtfile=adms, ddtlib=derived);
+
+data derived.adsl(label='Subject-Level Analysis Dataset');
+	set final_1;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
