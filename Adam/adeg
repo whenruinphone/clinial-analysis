@@ -1,0 +1,228 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adeg.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - - 
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : to derive ADEG
+INPUT FILES    :
+OUTPUT FILES   : derived.adeg
+MACROS USED    : %mc_clrup %mapavisit %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=adeg;
+
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+proc sql noprint;
+  select distinct ITMNAME into: keepvar separated by ' ' 
+  from derived.adms where upcase(MEMNAME) = 'ADEG';
+quit;
+
+%put &keepvar.;
+
+%macro _eg(if=,var=,param=,paramcd=,paramn=); 
+data _eg_&paramn.;
+    length ADTC $19 AVALC $25 PARAM EGSTAT $200 PARAMCD $8 EGABNCS $200;
+    set raw.eg raw.eg1(rename=(EGTPT1=EGTPT));
+    if EGPERF='是' and &if. then do;
+	  EGSTAT='是';
+	  PARAM=&param.;
+	  PARAMCD=&paramcd.;
+	  PARAMN=&paramn.;
+	  %if &paramn.<6 %then %do;
+		AVAL=&var.;
+		AVALC=&var._RAW;
+	  %end;
+	  %if &paramn.=6 %then %do;
+		AVAL=.;
+		AVALC=&var.;
+	  %end;
+	  if EGTIM^='' and length(scan(strip(EGTIM),1,':'))=1 then EGTIM='0'||EGTIM;
+	  if EGTIM^='' then ADTC=put(input(compress(EGDAT_RAW),date9.),is8601da.)||'T'||EGTIM;
+	  if EGTIM=''  then ADTC=put(input(compress(EGDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(EGTIM,??time5.);
+	  if EGDESC^='' then EGABNCS=prxchange("s/\n|\r//",-1,EGDESC);;
+	  output;
+	end;
+run;
+%mend;
+%_eg(if=EGHD^=.,var=EGHD,param='心率 (bpm)',paramcd='HR',paramn=1); 
+%_eg(if=EGPR^=.,var=EGPR,param='PR间期 (msec)',paramcd='PR',paramn=2); 
+%_eg(if=EGQRS^=.,var=EGQRS,param='QRS间期 (msec)',paramcd='QRS',paramn=3); 
+%_eg(if=EGQT^=.,var=EGQT,param='QT间期 (msec)',paramcd='QT',paramn=4); 
+%_eg(if=EGQTC^=.,var=EGQTC,param='QTC间期 (msec)',paramcd='QTC',paramn=5); 
+%_eg(if=EGCLSIG^='',var=EGCLSIG,param='研究者判断',paramcd='INTP',paramn=6); 
+
+data egall;
+    length ADTC $19 PARAM EGSTAT $200 PARAMCD $8;
+    set raw.eg raw.eg1(rename=(EGTPT1=EGTPT));
+    if EGPERF='否' then do;
+      EGSTAT=strip(EGPERF)||', '||strip(EGPERFN);
+	  PARAMCD='EGALL';
+	  PARAM='所有十二导联心电图';
+	  PARAMN=999;
+	  if EGTIM^='' then ADTC=put(input(compress(EGDAT_RAW),date9.),is8601da.)||'T'||EGTIM;
+	  if EGTIM=''  then ADTC=put(input(compress(EGDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(EGTIM,??time5.);
+	  output;
+	end;
+run;
+
+data eg_1;
+    length SUBJID $30;
+    set _eg_1-_eg_6 egall;
+
+	SUBJID=SUBJECT;
+	if EGTPT="服药后2h(±30min)" then do;EGTPT="给药后2h";EGTPTN=1;end;
+	else if EGTPT="服药后4h(±30min)" then do;EGTPT="给药后4h";EGTPTN=2;end;
+run;
+
+proc sort data=eg_1;by SUBJID;run;
+data eg_2;
+    length DDTDAY $50;
+    merge derived.adsl(in=a) eg_1(in=b drop=STUDYID);
+	by SUBJID;
+	if b;
+	if nmiss(ADT, TR01SDT)=0 then ADY=ADT-TR01SDT+(ADT>=TR01SDT);
+	if not missing(ADY) then DDTDAY=strip(ADTC)||' ('||strip(put(ADY,?best.))||')';
+    else if missing(ADY) and not missing(ADTC) then DDTDAY=strip(ADTC)||' (-)';
+    DDTDAY=tranwrd(DDTDAY,'T',' ');
+run;
+
+*****************ABLFL*****************;
+proc sort data=eg_2;
+    by USUBJID PARAMN PARAMCD descending ADTC;
+run;
+
+data eg_3;
+    length BASETYPE $200;
+    set eg_2;
+    by USUBJID PARAMN PARAMCD descending ADTC;
+    Retain flag flag1;
+    if first.PARAMCD then flag=0;
+    if flag=0 and AVALC ne ' ' and ADTC=<TR01SDTC then do;
+      ABLFL='Y';
+      flag=1;
+	  BASETYPE='第一周期基线';
+    end;
+    if first.PARAMCD then flag1=0;
+    if flag1=0 and AVALC ne ' ' and ADTC=<TR02SDTC then do;
+      ABLFL1='Y';
+      flag1=1;
+      BASETYPE='第二周期基线';
+    end;
+run;
+
+****************BASE1 BASE2********************;
+data BASE1(keep=USUBJID PARAMN BASE1 ADTC PARAMCD);
+    SET eg_3;
+    where ABLFL='Y';
+    BASE1=AVAL;
+run;
+
+proc sort data=eg_3;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+proc sort data=BASE1;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+data eg_4;
+    merge eg_3 BASE1(drop=ADTC);
+    by USUBJID PARAMN PARAMCD;
+    if ADTC>TR01SDTC and nmiss(BASE1,AVAL)=0 then CHG1=AVAL-BASE1;
+run;
+
+data BASE2(keep=USUBJID PARAMN BASE2 ADTC PARAMCD);
+    SET eg_3;
+    where ABLFL1='Y';
+    BASE2=AVAL;
+run;
+
+proc sort data=eg_4;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+proc sort data=BASE2;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+data eg_5;
+    merge eg_4 BASE2(drop=ADTC);
+    by USUBJID PARAMN PARAMCD;
+    if ADTC>TR02SDTC and nmiss(BASE2,AVAL)=0 then CHG2=AVAL-BASE2;
+	TEST=strip(scan(PARAM,1,'('));
+run;
+
+proc sort data=eg_5;by SUBJID PARAMN ADTC;run;
+
+data final;
+    length DDTDAY $50 APERIODC $20 ATPT AVISIT $50 EGTPT $200;
+    merge derived.adsl(in=a) eg_5(in=b rename=(EGTPT=EGTPT_1));
+	by SUBJID;
+	if b;
+
+	%mapavisit;
+	EGTPT=EGTPT_1;
+    if ADTC<TR01SDTC then BASE1=.;
+    if ADTC<TR02SDTC then BASE2=.;
+	if ABLFL1^='' then ABLFL=ABLFL1;
+	if 1<=ADY<=4 then do;APERIOD=1;APERIODC="第一周期";end;
+	else if 12<=ADY<=18 then do;APERIOD=2;APERIODC="第二周期";end;
+
+    if ABLFL="Y" and BASETYPE='第一周期基线' then AVISIT="基线";
+    else if ABLFL="Y" and  BASETYPE='第二周期基线' then AVISIT="第二周期基线";
+    else if find(visit, '计划外访视') or find(visit, '筛选期') then avisit='';
+    else AVISIT=VISIT;
+
+	if AVISIT="基线" then AVISITN=0;
+	else if AVISIT="第一周期 D1" then AVISITN=1;
+	else if AVISIT="第一周期 D2" then AVISITN=2;
+	else if AVISIT="第一周期 D3" then AVISITN=3;
+	else if AVISIT="第一周期 D4" then AVISITN=4;
+	else if AVISIT="第二周期 D12~14" then AVISITN=5;
+	else if AVISIT="第二周期基线" then AVISITN=6;
+	else if AVISIT="第二周期 D15" then AVISITN=7;
+	else if AVISIT="第二周期 D16" then AVISITN=8;
+	else if AVISIT="第二周期 D17" then AVISITN=9;
+	else if AVISIT="第二周期 D18" then AVISITN=10;
+	else if AVISIT="提前退出" then AVISITN=11;
+
+	if ABLFL='Y' and BASETYPE='第一周期基线' then ATPT='基线';  
+    else if ABLFL='Y' and BASETYPE='第二周期基线' then ATPT='第二周期服药前(第二周期基线)';  
+	if EGTPT^='' and ABLFL^='Y' then do;
+		ATPT=strip(AVISIT)||' '||strip(EGTPT);
+		ATPTN=AVISITN+EGTPTN/10;
+	end;
+	else if EGTPT='' and ABLFL^='Y' then do;
+		ATPT=strip(AVISIT);
+		ATPTN=AVISITN;
+	end;
+	else ATPTN=AVISITN;
+	keep &keepvar.;
+run;
+
+proc sort data=final;by USUBJID PARAMN VISITNUM ADTC;run;
+
+%mattrib (inds=final, outds=final_1, dsname=ADEG, ddtfile=adms, ddtlib=derived);
+
+data derived.adeg(label='ECG Test Results Analysis Dataset');
+	set final_1;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
