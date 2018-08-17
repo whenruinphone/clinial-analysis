@@ -1,0 +1,168 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adcm.sas,v $
+REV/REV        : $Revision: 1.2 $
+AUTH           : $Author: huang_feiyi $
+REV DATE       : $Date: 2018/05/30 05:43:24 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNPS0222
+PURPOSE        : derived ADCM
+INPUT FILES    : raw.cm, derived.adsl
+OUTPUT FILES   : derived.adcm
+MACROS USED    : %mc_clrup, %mc_gtbtf, %mc_addpn, %mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+/*clear the work dateset**/
+%mc_clrup;
+
+%let progname=adcm;
+
+/**log output**/
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+**keep the needed variables;
+proc sql noprint;
+	select strip(itmname) into :kpadcm separated by ' ' from derived.adms where memname='ADCM';
+quit;
+
+%put &kpadcm.;
+
+*raw data;
+%idvar(in=raw.cm, out=cm_);
+
+data cm1;
+	set cm_(rename=(CMTRT=CMTRT_ CMDOSU=CMDOSU_ CMDOSFRQ=CMDOSFRQ_ CMROUTE=CMROUTE_ 
+	CMINDC=CMINDC_));
+	where CMYN='是';
+
+	length CMTRT $200. CMENRF $1. 
+	CMDOSU $8. CMDOSFRQ $50. CMROUTE $50. CMINDC $200. 
+	CMSTDTC $19. CMENDTC $19.;
+
+	*CMTRT, CMENRF;
+	if CMYN="是" then CMTRT=CMTRT_;
+	
+	CMENRF=CMONGO;
+
+	*CMDOSE, CMDOSU, CMDOSFRQ, CMROUTE, CMINDC ;
+	CMDOSE=input(compress(CMDSTXT,'1234567890.','k'),best.);
+
+	If CMDOSU_="其他" then CMDOSU=CMDSUOTH;
+	else CMDOSU=CMDOSU_;
+
+	If CMDOSFRQ_="其他" then CMDOSFRQ=CMFRQOTH;
+	else CMDOSFRQ=CMDOSFRQ_; 
+
+	If CMROUTE_="其他" then CMROUTE=CMRUOTH; 
+	else CMROUTE=CMROUTE_;
+
+	If CMINDC_="其他" then CMINDC=CMINDCO;
+	else if CMINDC_="病史" then CMINDC=strip(CMINDC_)||", "||strip(CMMHNO);
+	else if CMINDC_="不良事件" then CMINDC=strip(CMINDC_)||", "||strip(CMAENO);
+	else CMINDC=CMINDC_; 
+
+	*CMSTDTC, CMENDTC;
+	%isodt(indt=CMSTDAT_RAW, outdt=CMSTDTC);
+	%isodt(indt=CMENDAT_RAW, outdt=CMENDTC);
+run;
+
+data cm2;
+	set cm1;
+	length CMATC $200. CMDECOD $200.;
+
+	*CMATC, CMDECOD;
+	CMATC='';*NULL now, waiting for coding file;
+	CMDECOD='';*NULL now, waiting for coding file;
+proc sort;
+	by usubjid;
+run;
+
+proc sort data=derived.adsl out=adsl_;
+	by usubjid;
+run;
+
+*merge cm and adsl;
+data cm3_sl;
+	merge cm2(in=a) adsl_;
+	by usubjid;
+	if a;
+	length CMCAT $50.;
+
+	*CMCAT;
+	if ''<CMSTDTC<TR01SDTC and ''<CMENDTC<TR01SDTC then CMCAT='既往用药';
+	else if CMSTDTC>=TR01SDTC>'' then CMCAT='合并用药';
+	else if ''<CMSTDTC<TR01SDTC and CMENDTC>TR01SDTC>'' then CMCAT='合并用药';
+
+	if length(CMSTDTC)=10 then astdt=input(CMSTDTC,yymmdd10.);
+	if length(CMENDTC)=10 then aendt=input(CMENDTC,yymmdd10.);
+run;
+
+*CMSTDY, CMENDY;
+%xxdy(in=cm3_sl, out=cm4_dy, indy=CMSTDTC, outdy=ASTDY, periodf=N);
+%xxdy(in=cm4_dy, out=cm5_dy, indy=CMENDTC, outdy=AENDY, periodf=N);
+
+data cm6;
+	set cm5_dy;
+	length ATC COD DATCDE $200. DSTENDY $200.;
+
+	*sys, and cod for concatenation;
+	if CMATC='' then ATC='Uncoded';
+	else ATC=CMATC;
+
+	if CMDECOD='' then COD='Uncoded';
+	else COD=CMDECOD;
+
+	*DSOCPT;
+	DATCDE = strip(ATC) || '/^-2n' || strip(COD) || '/^-2n' || strip(CMTRT);
+
+	if CMONGO="否" then do;
+		if CMSTDTC^='' then ddp1 = strip(CMSTDTC) || " (" || strip(put(ASTDY,best.));
+		if CMENDTC^='' then ddp2 = strip(CMENDTC) || " (" || strip(put(AENDY,best.));
+		if ddp1^='' and ddp2^='' then DSTENDY = strip(ddp1) || ') /^-2n' || strip(ddp2) || ")";
+		else if ddp1^='' and ddp2='' then DSTENDY = strip(ddp1);
+		else if ddp1='' and ddp2^='' then DSTENDY = '/^-2n' || strip(ddp2) || ")";
+	end;
+run;
+
+data cm7_kp;
+	set cm6;
+	keep &kpadcm.;
+run;
+
+proc sort data=cm7_kp out=final;
+	by STUDYID USUBJID CMTRT CMSTDTC CMENDTC;
+/*	informat _all_;*/
+/*	format _all_;*/
+run;
+
+
+*MARRTIB;
+%mattrib ( 		 inds    = final ,
+                 ddtfile = adms  ,
+                 outds   = adcm ,
+                 dsname  = ADCM ,
+                 ddtlib  = DERIVED  ,
+                 header  = NO    , 
+                 dlabel  = 'Concomitant Medication Analysis Dataset'   ,
+                 cleanup = YES   );
+
+
+data derived.adcm(label='Concomitant Medication Analysis Dataset');
+	set adcm;
+proc sort;
+	by STUDYID USUBJID CMTRT CMSTDTC CMENDTC;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
+
+/*proc compare base=derived.adcm comp=deriveqc.qc_adcm;run;*/
