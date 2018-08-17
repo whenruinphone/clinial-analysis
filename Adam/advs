@@ -1,0 +1,310 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: advs.sas,v $
+REV/REV        : $Revision: 1.5 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - - 
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : to derive ADVS
+INPUT FILES    :
+OUTPUT FILES   : derived.advs
+MACROS USED    : %mc_clrup %mapavisit %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=advs;
+
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+proc sql noprint;
+    select distinct ITMNAME into: keepvar separated by ' ' 
+    from derived.adms where upcase(MEMNAME) = 'ADVS';
+quit;
+
+%put &keepvar.;
+
+data vs_nd;
+    length ADTC $19 AVALC $25 PARAM VSSTAT $200 PARAMCD $8;
+    set raw.vs(in=a) raw.vs3(in=b);
+
+    if VSPERF='否' then do;
+      VSSTAT=strip(VSPERF)||', '||strip(VSPERFN);
+	  PARAMCD='VSALL';
+	  PARAM='所有生命体征';
+	  PARAMN=999;
+	  if VSTIM^='' and length(scan(strip(VSTIM),1,':'))=1 then VSTIM='0'||VSTIM;
+	  if VSTIM^='' then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.)||'T'||VSTIM;
+	  if VSTIM=''  then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(VSTIM,??time5.);
+	  AVAL=input(VSORRES_RAW,??best.);
+	  AVALC=VSORRES_RAW;
+	  output;
+	end;  
+run;
+
+proc sort data=vs_nd nodupkey;
+    by subject folder;
+run;
+
+data vs_d;
+    length ADTC $19 AVALC $25 PARAM VSSTAT $200 PARAMCD $8;
+    set raw.vs(in=a) raw.vs3(in=b);
+
+    if VSPERF='是' then do;
+      VSSTAT='是';
+	  if VSTEST='收缩压' then do;PARAMCD='SYSBP';PARAM='收缩压 (mmHg)';PARAMN=1;end;
+	  if VSTEST='舒张压' then do;PARAMCD='DIABP';PARAM='舒张压 (mmHg)';PARAMN=2;end;
+	  if VSTEST='心率' then do;PARAMCD='PULSE';PARAM='脉搏 (次/分)';PARAMN=4;end;
+	  if VSTEST='呼吸' then do;PARAMCD='RESP';PARAM='呼吸 (次/分)';PARAMN=3;end;
+	  if VSTEST='体温' then do;PARAMCD='TEMP';PARAM='体温 (℃)';PARAMN=5;end;
+	  if VSTIM^='' and length(scan(strip(VSTIM),1,':'))=1 then VSTIM='0'||VSTIM;
+	  if VSTIM^='' then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.)||'T'||VSTIM;
+	  if VSTIM=''  then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(VSTIM,??time5.);
+	  AVAL=input(VSORRES_RAW,??best.);
+	  AVALC=VSORRES_RAW;
+	  output;
+    end;
+run;
+
+%macro _vs(var=,param=,paramcd=,paramn=); 
+data _vs_&paramn.;
+    length ADTC $19 AVALC $25 PARAM VSSTAT $200 PARAMCD $8;
+    set raw.vs1 raw.vs2(rename=(VSTPT1=VSTPT));
+
+    if VSPERF='是' and &var.^=. then do;
+	  VSSTAT='是';
+	  PARAM=&param.;
+	  PARAMCD=&paramcd.;
+	  PARAMN=&paramn.;
+	  AVAL=&var.;
+	  AVALC=&var._RAW;
+	  if VSTIM^='' and length(scan(strip(VSTIM),1,':'))=1 then VSTIM='0'||VSTIM;
+	  if VSTIM^='' then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.)||'T'||VSTIM;
+	  if VSTIM=''  then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(VSTIM,??time5.);
+	  output;
+	end;
+run;
+%mend;
+%_vs(var=SYSBP,param='收缩压 (mmHg)',paramcd='SYSBP',paramn=1); 
+%_vs(var=DIABP,param='舒张压 (mmHg)',paramcd='DIABP',paramn=2); 
+%_vs(var=BREATH,param='呼吸 (次/分)',paramcd='RESP',paramn=3); 
+%_vs(var=PULSE,param='脉搏 (次/分)',paramcd='PULSE',paramn=4); 
+%_vs(var=TEMP,param='体温 (℃)',paramcd='TEMP',paramn=5); 
+
+data vsall;
+    length ADTC $19 PARAM VSSTAT $200 PARAMCD $8;
+    set raw.vs1 raw.vs2(rename=(VSTPT1=VSTPT));
+
+    if VSPERF='否' then do;
+      VSSTAT=strip(VSPERF)||', '||strip(VSPERFN);
+	  PARAMCD='VSALL';
+	  PARAM='所有生命体征';
+	  PARAMN=999;
+	  if VSTIM^='' then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.)||'T'||VSTIM;
+	  if VSTIM=''  then ADTC=put(input(compress(VSDAT_RAW),date9.),is8601da.);
+	  ADT=input(substr(ADTC,1,10),??is8601da.);
+	  ATM=input(VSTIM,??time5.);
+	  output;
+	end;
+run;
+
+data vs_1;
+    length SUBJID $30;
+    set vs_d vs_nd _vs_1-_vs_5 vsall;
+
+	SUBJID=SUBJECT;
+	if VSTPT="给药前40min内" then do;VSTPT="给药前40min内";VSTPTN=1;end;
+	else if VSTPT="给药后2h（±30min）" then do;VSTPT="给药后2h";VSTPTN=2;end;
+	else if VSTPT="给药后4h（±30min）" then do;VSTPT="给药后4h";VSTPTN=3;end;
+	else if VSTPT="给药后12h（±30min）" then do;VSTPT="给药后12h";VSTPTN=4;end;
+	else if VSTPT="给药后24h（±30min）" then do;VSTPT="给药后24h";VSTPTN=5;end;
+	else if VSTPT="给药后36h（±30min）" then do;VSTPT="给药后36h";VSTPTN=6;end;
+run;
+
+proc sort data=vs_1;
+    by SUBJID;
+run;
+
+data vs_2;
+    length DDTDAY $50;
+    merge derived.adsl(in=a) vs_1(in=b drop=STUDYID);
+	by SUBJID;
+	if b;
+
+	%mapavisit;
+	if nmiss(ADT, TR01SDT)=0 then ADY=ADT-TR01SDT+(ADT>=TR01SDT);
+	if not missing(ADY) then DDTDAY=strip(ADTC)||' ('||strip(put(ADY,?best.))||')';
+    else if missing(ADY) and not missing(ADTC) then DDTDAY=strip(ADTC)||' (-)';
+    DDTDAY=tranwrd(DDTDAY,'T',' ');
+run;
+
+*****************ABLFL*****************;
+proc sort data=vs_2;
+    by USUBJID PARAMN PARAMCD descending ADTC descending VISITNUM;
+run;
+
+data vs_3;
+    length BASETYPE $200;
+    set vs_2;
+    by USUBJID PARAMN PARAMCD descending ADTC descending VISITNUM;
+    Retain flag flag1;
+    if first.PARAMCD then flag=0;
+    if flag=0 and AVALC ne ' ' and ADTC=<TR01SDTC then do;
+      ABLFL='Y';
+      flag=1;
+	  BASETYPE='第一周期基线';
+    end;
+    if first.PARAMCD then flag1=0;
+    if flag1=0 and AVALC ne ' ' and ADTC=<TR02SDTC then do;
+      ABLFL1='Y';
+      flag1=1;
+	  BASETYPE='第二周期基线';
+    end;
+run;
+
+****************BASE1 BASE2********************;
+data BASE1(keep=USUBJID PARAMN BASE1 ADTC PARAMCD);
+    set vs_3;
+    where ABLFL='Y';
+    BASE1=AVAL;
+run;
+
+proc sort data=vs_3;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+proc sort data=BASE1;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+data vs_4;
+    merge vs_3 BASE1(drop=ADTC);
+    by USUBJID PARAMN PARAMCD;
+    if ADTC>TR01SDTC and nmiss(BASE1,AVAL)=0 then CHG1=AVAL-BASE1;
+run;
+
+data BASE2(keep=USUBJID PARAMN BASE2 ADTC PARAMCD);
+    set vs_3;
+    where ABLFL1='Y';
+    BASE2=AVAL;
+run;
+
+proc sort data=vs_4;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+proc sort data=BASE2;
+    by USUBJID PARAMN PARAMCD;
+run;
+
+data vs_5;
+    merge vs_4 BASE2(drop=ADTC);
+    by USUBJID PARAMN PARAMCD;
+    if ADTC>TR02SDTC and nmiss(BASE2,AVAL)=0 then CHG2=AVAL-BASE2;
+	TEST=strip(scan(PARAM,1,'('));
+run;
+
+proc import out=vsrange
+	datafile="&DATAPath.\Import\生命体征正常值范围.xlsx"
+	dbms=excel replace;
+	range="Sheet1$A1:C200";
+	getnames=NO;
+run;
+
+data vsrange_1;
+    set vsrange;
+	VSLOW=input(strip(scan(F2,1,'-')),best.);
+	VSHIGH=input(strip(scan(F2,2,'-')),best.);
+	TEST=F1;
+	if TEST='心率' then TEST='脉搏';
+run;
+
+proc sort data=vs_5;
+    by TEST;
+run;
+
+proc sort data=vsrange_1; 
+    by TEST;
+run;
+
+data vs_6;
+    length VSCLSIG $40;
+    merge vs_5 vsrange_1;
+	by TEST;
+    if .<AVAL<VSLOW or AVAL>VSHIGH>. then VSCLSIG='异常';
+	else if .<VSLOW<=AVAL<=VSHIGH then VSCLSIG="正常";
+run;
+
+proc sort data=vs_6;
+    by SUBJID PARAMN ADTC VISITNUM;
+run;
+
+data final;
+    length DDTDAY $50 APERIODC $20 ATPT AVISIT $50 VSTPT $30;
+    merge derived.adsl(in=a) vs_6(in=b rename=(VSTPT=VSTPT_1));
+	by SUBJID;
+	if b;
+	VSTPT=VSTPT_1;
+    if ADTC<TR01SDTC then BASE1=.;
+    if ADTC<TR02SDTC then BASE2=.;
+	if ABLFL1^='' then ABLFL=ABLFL1;
+	if 1<=ADY<=4 then do;APERIOD=1;APERIODC="第一周期";end;
+	else if 12<=ADY<=18 then do;APERIOD=2;APERIODC="第二周期";end;
+
+    if ABLFL="Y" and BASETYPE='第一周期基线' then AVISIT="基线";
+    else if ABLFL="Y" and  BASETYPE='第二周期基线' then AVISIT="第二周期基线";
+    else if find(visit, '计划外访视') or find(visit, '筛选期') then avisit='';
+    else AVISIT=VISIT;
+
+	if AVISIT="基线" then AVISITN=0;
+	else if AVISIT="第一周期 D1" then AVISITN=1;
+	else if AVISIT="第一周期 D2" then AVISITN=2;
+	else if AVISIT="第一周期 D3" then AVISITN=3;
+	else if AVISIT="第一周期 D4" then AVISITN=4;
+	else if AVISIT="第二周期 D12~14" then AVISITN=5;
+	else if AVISIT="第二周期基线" then AVISITN=6;
+	else if AVISIT="第二周期 D15" then AVISITN=7;
+	else if AVISIT="第二周期 D16" then AVISITN=8;
+	else if AVISIT="第二周期 D17" then AVISITN=9;
+	else if AVISIT="第二周期 D18" then AVISITN=10;
+	else if AVISIT="提前退出" then AVISITN=11;
+
+	if VSTPT^='' then do;
+		ATPT=strip(AVISIT)||' '||strip(VSTPT);
+		ATPTN=AVISITN+VSTPTN/10;
+	end;
+	else if VSTPT='' and ABLFL^='Y' then do;
+		ATPT=strip(AVISIT);
+		ATPTN=AVISITN;
+	end;
+	else ATPTN=AVISITN;
+	if ABLFL='Y' and BASETYPE='第一周期基线' then ATPT='基线';  
+    else if ABLFL='Y' and BASETYPE='第二周期基线' then ATPT='第二周期服药前(第二周期基线)';  
+	keep &keepvar.;
+run;
+
+proc sort data=final;
+    by USUBJID PARAMN VISITNUM ADTC;
+run;
+
+%mattrib (inds=final, outds=final_1, dsname=ADVS, ddtfile=adms, ddtlib=derived);
+
+data derived.advs(label='Vital Signs Analysis Dataset');
+	set final_1;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
