@@ -1,0 +1,288 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: ADAE.sas,v $
+REV/REV        : $Revision: 1.5 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/15 09:56:30 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : derived ADAE
+INPUT FILES    : raw.ae, coding data
+OUTPUT FILES   : derived.adae
+MACROS USED    : %mc_clrup %idvar %isodt %aperiod %xxdy %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+/*clear the work dateset**/
+%mc_clrup;
+
+%let progname=adae;
+
+/**log output**/
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+**keep the needed variables;
+proc sql noprint;
+	select strip(itmname) into :kpadae separated by ' ' from derived.adms where memname='ADAE';
+quit;
+
+%put &kpadae.;
+
+*raw data;
+%idvar(in=raw.ae, out=ae_);
+
+proc import datafile= "&PROJPATH.\Data\Import\SYBE-PD008_coding results_14Aug2018_14Aug2018.xlsx"
+	dbms=excel out=aecd_ replace;
+	range="不良事件$A3:N300";
+	getnames=yes;
+run;
+
+data aecd1;
+	set aecd_(rename=(aeterm=aeterm_ RecordPosition=recdp));
+	length USUBJID $30;
+	USUBJID="SYBE-PD008"||"-"||strip(Subject);
+	RecordPosition=input(recdp,??best.);
+proc sort;
+	by usubjid RecordPosition;;
+run;
+
+*raw variable;
+data ae1;
+	set ae_(rename=(AETERM=AETERM_ AEOUT=AEOUT_ AESEV=AESEV_ AESER=AESER_ AEREL=AEREL_
+	AEACN=AEACN_ AEDIS=AEDIS_ AESHOSP=AESHOSP_ AESDISAB=AESDISAB_ AESCONG=AESCONG_ AESDTH=AESDTH_
+	AESLIFE=AESLIFE_ AESMIE=AESMIE_ AEONGO=AEONGO_));
+
+	where aeyn='是';
+
+	length AETERM $200 AEOUT AESEV $40 AESER AERELFL $3 AEREL $50 AEACN $200 AETRTFL $3
+	AEMTHD $200 AEDIS AESHOSP AESDISAB AESCONG AESDTH AESLIFE AESMIE $3 AESEREA $1
+	AESTDTC $19 AEONGO $3;
+
+	*AETERM;
+	if AEYN='是' then AETERM=AETERM_;
+
+	*AEOUT, AEOUTN;
+	if AEOUT_STD=7 then AEOUT="其他："||strip(AEOUTOTH);
+	else AEOUT=AEOUT_;
+
+	AEOUTN=AEOUT_STD;
+
+	*AESEV, AESEVN;
+	AESEV=AESEV_;
+	AESEVN=AESEV_STD;
+
+	*AESER;
+	AESER=AESER_;
+
+	*AERELFL, AEREL, AERELN;
+	if AEREL_ in ("肯定有关", "很可能有关", "可能有关") then AERELFL='是';
+	else AERELFL='否';
+
+	AEREL=AEREL_;
+	AERELN=AEREL_STD;
+
+	*AEACN, AEACNN;
+	If AEACN_STD=6 then AEACN="其他："||strip(AERELOSP);
+	else AEACN=AEACN_;
+
+	AEACNN=AEACN_STD;
+
+	*AETRTFL, AEMTHD, AEMTHDN;
+	If AECMYN='否' then AETRTFL='否';
+	else AETRTFL='是';
+
+	If AECMYN_STD=4 then AEMTHD="其他："||AEOMTHD;
+	else AEMTHD=AECMYN;
+	AEMTHDN=AECMYN_STD;
+
+	*AEDIS, AESHOS, AESHOSP, AESDISAB, AESCONG;
+	AEDIS=AEDIS_;
+	AESHOSP=AESHOSP_;
+	AESDISAB=AESDISAB_;
+	AESCONG=AESCONG_;
+
+	*AESDTH;
+	if AEOUT_="死亡" then AESDTH="是" ; 
+	else AESDTH=AESDTH_;
+
+	*AESLIFE, AESMIE;
+	AESLIFE=AESLIFE_;
+	AESMIE=AESMIE_;
+
+	*AESEREA;
+	if AESER='是' then do; 
+		if AESDTH='是' then AESEREA="1";
+		else if AESLIFE='是' then AESEREA="2";
+		else if AESHOSP='是' then AESEREA="3";
+		else if AESDISAB='是' then AESEREA="2";
+		else if AESCONG='是' then AESEREA="3";
+		else if AESMIE='是' then AESEREA="6";
+	end;
+
+	*AEONGO;
+	AEONGO=AEONGO_;
+
+	*AESTDTC;
+	%isodt(indt=AESTDAT_RAW, intim=AESTTIM, outdt=AESTDTC);
+proc sort;
+	by usubjid RecordPosition;
+run;
+
+data ae1_t;
+	merge ae1 aecd1;
+	by usubjid recordposition;
+	length AEDECOD AEBODSYS $200;
+	AEDECOD=strip(pt_name);
+	AEBODSYS=strip(soc_name);
+run;
+
+data ae2;
+	length AEENDTC $19;
+	set ae1_t;
+
+	%isodt(indt=AEENDAT_RAW, intim=AEENTIM, outdt=AEENDTC);
+
+	*ASTDT, AENDT;
+	if length(AESTDTC)>=10 
+	and length(scan(substr(AESTDTC,1,10),1,"-"))=4 
+	and length(scan(substr(AESTDTC,1,10),2,"-"))=2
+	and length(scan(substr(AESTDTC,1,10),3,"-"))=2 
+	then ASTDT=input(substr(AESTDTC,1,10),yymmdd10.);
+	format ASTDT date9.;
+
+	if length(AEENDTC)>=10 
+	and length(scan(substr(AEENDTC,1,10),1,"-"))=4 
+	and length(scan(substr(AEENDTC,1,10),2,"-"))=2
+	and length(scan(substr(AEENDTC,1,10),3,"-"))=2 
+	then AENDT=input(substr(AEENDTC,1,10),yymmdd10.);
+	format AENDT date9.;
+
+	*ASTTM, AENTM;
+	if find(AESTDTC,"T") and length(strip(scan(AESTDTC,2,"T")))=5
+	then ASTTM=input(strip(scan(AESTDTC,2,"T")),time5.);
+	format ASTTM time5.;
+
+	if find(AEENDTC,"T") and length(strip(scan(AEENDTC,2,"T")))=5
+	then AENTM=input(strip(scan(AEENDTC,2,"T")),time5.);
+	format AENTM time5.;
+proc sort;
+	by usubjid;
+run;
+
+proc sort data=derived.adsl out=adsl_;
+	by usubjid;
+run;
+
+data ae3;
+	length TRTEMFL $3;
+	merge ae2(in=a) adsl_;
+	by usubjid;
+	if a;
+
+	le=min(length(AESTDTC),length(tr01sdtc));
+	if DSCPDTC^='' then le2=min(length(AESTDTC),length(DSCPDTC));
+
+
+	if  AESTDTC^='' 
+		and tr01sdtc^=''
+		and DSCPDTC^=''
+		and substr(AESTDTC, 1, le2)<=substr(DSCPDTC, 1, le2)
+		and substr(AESTDTC, 1, le)>=substr(tr01sdtc, 1, le)
+		then TRTEMFL='是';
+	else TRTEMFL='否';
+
+	if length (AESTDTC)=16 then ASTDTM=input(AESTDTC,is8601dt.);
+	if length (AEENDTC)=16 then AENDTM=input(AEENDTC,is8601dt.);
+run;
+
+%aperiod(ind=ae3, otd=ae4_ape, dtc=AESTDTC);
+%xxdy(in=ae4_ape, out=ae5_stdy, indy=AESTDTC, outdy=ASTDY, periodf=N);
+%xxdy(in=ae5_stdy, out=ae6_endy, indy=AEENDTC, outdy=AENDY, periodf=N);
+
+data ae7;
+	length TRTA $20 DSOCPT DTRTAPE SYS COD SDT STM SDY EDT ETM EDY DSTENDY DSEREA $200;
+	set ae6_endy;
+	
+	*TRTA, TRTAN;
+	If APERIOD=1 then TRTA=TRT01A; 
+	else if APERIOD=2 then TRTA=TRT02A;
+	
+	if TRTA='受试制剂' then TRTAN=1;
+	if TRTA='参比制剂' then TRTAN=2;
+
+	*sys, and cod for concatenation;
+	if AEBODSYS='' then SYS='未编码';
+	else SYS=AEBODSYS;
+
+	if AEDECOD='' then COD='未编码';
+	else COD=AEDECOD;
+
+	*DSOCPT;
+	DSOCPT = strip(SYS) || '/^n^w^w' || strip(COD) || '/^n^w^w^w^w' || strip(AETERM);
+
+	if TRTEMFL^='' and APERIODC^='' then DTRTAPE = strip(TRTEMFL) || '/' || strip(APERIODC);
+	else if TRTEMFL^='' and APERIODC='' then DTRTAPE = strip(TRTEMFL);
+
+	*DSTENDY;
+	if astdt^=. then sdt=put(astdt,yymmdd10.);
+	if asttm^=. then stm=put(asttm,time5.);
+	if astdy^=. then sdy=put(astdy,best.);
+	else sdy='-';
+	if aendt^=. then edt=put(aendt,yymmdd10.);
+	if aentm^=. then etm=put(aentm,time5.);
+	if aendy^=. then edy=put(aendy,best.);
+	else edy='-';
+
+	if length(scan(strip(stm),1,":"))=1 and length(stm)>=4 then stm='0'||strip(stm);
+	if length(scan(strip(etm),1,":"))=1 and length(etm)>=4 then etm='0'||strip(etm);
+
+	if sdt^='' and stm^='' then dsp1=strip(sdt) || " " || strip(stm) || " (" || strip(sdy) || ")";
+	else if sdt^='' and stm='' then dsp1=strip(sdt) || " (" || strip(sdy) || ")";
+
+	if edt^='' and etm^='' then dsp2=strip(edt) || " " || strip(etm) || " (" || strip(edy) || ")";
+	else if edt^='' and etm='' then dsp2=strip(edt) || " (" || strip(edy) || ")";
+
+	if dsp1^='' and dsp2^='' then DSTENDY = strip(dsp1) || '/^n' || strip(dsp2);
+	else if dsp1='' and dsp2^='' then DSTENDY = '/^n' || strip(dsp2);
+	else if dsp1^='' and dsp2='' then DSTENDY = strip(dsp1);
+
+	*DSEREA;
+	if AESER='是' then DSEREA=strip(AESER)||"/"||strip(AESEREA);
+	else DSEREA='否';
+run;
+
+data ae8_kp;
+	set ae7;
+	keep &kpadae.;
+run;
+
+proc sort data=ae8_kp out=final;
+	by STUDYID USUBJID AETERM ASTDT AENDT;
+run;
+
+*MARRTIB;
+%mattrib ( 		 inds    = final ,
+                 ddtfile = adms  ,
+                 outds   = adae ,
+                 dsname  = ADAE ,
+                 ddtlib  = DERIVED  ,
+                 header  = NO    , 
+                 dlabel  = 'Adverse Events Analysis Dataset'   ,
+                 cleanup = YES   );
+
+
+data derived.adae(label='Adverse Events Analysis Dataset');
+	set adae;
+proc sort;
+	by STUDYID USUBJID AETERM ASTDT AENDT;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
