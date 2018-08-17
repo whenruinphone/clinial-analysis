@@ -1,0 +1,155 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adpp.sas,v $
+REV/REV        : $Revision: 1.2 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/07/27 10:26:23 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : derive DERIVED.ADPP dataset
+INPUT FILES    : VENDOR DATA(PK DATA), derived.adsl
+OUTPUT FILES   : derived.adpp
+MACROS USED    : %mc_clrup, %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+**clear the work dateset**;
+%mc_clrup;
+
+%let progname=adpp;
+
+
+**log output**;
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+
+**keep the needed variables;
+proc sql noprint;
+	select strip(itmname) into :adppvars separated by ' ' from derived.adms where memname='ADPP';
+quit;
+
+%put &adppvars.;
+
+
+*import PK Parameters file ;
+proc import datafile="&PROJPATH\Data\Import\20180201_SYBE-PD008_Final Parameters Pivoted.xls" 
+	dbms=excel 
+	out=impk (where=(Subject_ID^='') keep=Subject_Group	Subject_ID Period Treatment_Description aucinf_obs auclast cmax tmax Lambda_z HL_Lambda_z) replace;
+    sheet="Sheet1$a1:al60";
+    getnames=yes; 
+    mixed=no;
+quit;
+
+data adpp_1;
+    length TRTA $40 aperiodc $20 randnum $9;
+    set impk(where=(cmiss(aucinf_obs,auclast,cmax,tmax)=0));
+
+	trta=strip(Treatment_Description);
+	randnum=strip(Subject_ID);
+	aperiod=period;
+
+	if trta='受试制剂' then trtan=1;
+	else if trta='参比制剂' then trtan=2;
+
+	if aperiod=1 then aperiodc='第一周期';
+	else if aperiod=2 then aperiodc='第二周期';
+run;
+
+proc sort data=adpp_1;
+    by randnum trtan trta aperiod aperiodc;
+run;
+
+proc transpose data=adpp_1 out=adpp_2;
+    by randnum trtan trta aperiod aperiodc;
+	var aucinf_obs auclast cmax tmax Lambda_z HL_Lambda_z;
+run;
+
+data adpp_3;
+    length paramcd $8 param avalc avalu $200;
+    set adpp_2;
+
+	aval=col1;
+	avalc=strip(put(col1,best12.));
+
+	if _name_='AUCINF_obs' then do;
+	  paramn=1;
+      paramcd='AUCINF'; 
+      param='AUC^{sub 0－∞} (h*ng/mL)';
+	  avalu='h*ng/mL';
+	end;
+	else if _name_='AUClast' then do;
+	  paramn=2;
+	  paramcd='AUCLAST'; 
+	  param='AUC^{sub 0－t} (h*ng/mL)';
+	  avalu='h*ng/mL';
+	end;
+	else if _name_='Cmax' then do;
+	  paramn=3;
+	  paramcd='CMAX'; 
+	  param='C^{sub max} (ng/mL)';
+	  avalu='ng/mL';
+	end;
+	else if _name_='Tmax' then do;
+	  paramn=4;
+	  paramcd='TMAX'; 
+	  param='T^{sub max} (h)';
+      avalu='h'; 
+	end;
+	else if _name_='Lambda_z' then do;
+	  paramn=5;
+	  paramcd='LAMZ'; 
+	  param='λ^{sub z} (1/h)';
+	  avalu='1/h';
+	end;
+	else if _name_='HL_Lambda_z' then do;
+	  paramn=6;
+	  paramcd='LAMZHL'; 
+	  param='T^{sub 1/2} (h)'; 
+	  avalu='h';
+	end;
+run;
+
+proc sort data=adpp_3;
+    by randnum;
+run;
+
+proc sort data=derived.adsl out=adsl_(keep=STUDYID USUBJID SUBJID SITENAM SCRNUM SCRNFL RANDNUM FASFL SAFFL PKFL BEFL COMPFL AGE 
+                                           SEX TRTGRP TRTGRPN TRTSEQP TRTSEQPN TRT01P TRT01PN TRT02P TRT02PN TRTSEQA TRTSEQAN 
+                                           TRT01A TRT01AN TRT02A TRT02AN TR01SDT TR01STM TR01EDT TR01ETM TR01SDTC TR01EDTC 
+                                           TR02SDT TR02STM TR02EDT TR02ETM TR02SDTC TR02EDTC);
+    by randnum;
+run;
+
+data adpp_4;
+    merge adpp_3(in=a) adsl_;
+	by randnum;
+	if a;
+
+	keep &adppvars.;
+run;
+
+%mattrib (inds=adpp_4, 
+          ddtfile=ADMS, 
+          outds=adpp, 
+          dsname=adpp, 
+          ddtlib=DERIVED);
+
+
+data derived.adpp(label= 'Pharmacokinetics Parameter Analysis Dataset' );
+	set adpp;
+run;
+
+proc sort data=derived.adpp;
+	by studyid usubjid aperiod paramn;
+run;
+
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
