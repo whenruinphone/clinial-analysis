@@ -1,0 +1,86 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adpe.sas,v $
+REV/REV        : $Revision: 1.6 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - - 
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : to derive ADPE
+INPUT FILES    : raw.pe derived.adsl
+OUTPUT FILES   : derived.adpe
+MACROS USED    : %mc_clrup %mapavisit %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+%let progname=adpe;
+
+proc printto log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+proc sql noprint;
+    select distinct ITMNAME into: keepvar separated by ' ' 
+    from derived.adms where upcase(MEMNAME) = 'ADPE';
+quit;
+
+%put &keepvar.;
+
+data pe;
+    length SUBJID $30 PEREASND $200 AVALC PARAM PEABN $200 PESTAT $8 ADTC $19;
+    set raw.pe;
+
+    if PEPERF='否' then do;
+      PESTAT=strip(PEPERF);
+      PEREASND=strip(PEPERFN);
+	  PARAM='所有体格检查';
+	  PARAMN=999;
+	end;
+
+    if PEPERF='是' then PESTAT='是';
+
+	  PARAM=PETEST;
+	  PARAMN=PETEST_STD;
+      ADTC=put(input(compress(PEDAT_RAW),date9.),is8601da.);
+      ADT=input(SUBSTR(ADTC,1,10),??is8601da.);
+	  AVALC=PEORRES;
+	  PEABN=PESPEC;
+	  SUBJID=SUBJECT;
+run;
+
+proc sort data=pe;
+    by SUBJID;
+run;
+
+data final;
+    length DDTDAY $50;
+    merge derived.adsl(in=a) pe(in=b drop=STUDYID);
+	by SUBJID;
+	if b;
+
+	%mapavisit;
+	if nmiss(ADT, TR01SDT)=0 then ADY=ADT-TR01SDT+(ADT>=TR01SDT);
+	if not missing(ADY) then DDTDAY=strip(ADTC)||' ('||strip(put(ADY,?best.))||')';
+    else if missing(ADY) and not missing(ADTC) then DDTDAY=strip(ADTC)||' (-)';
+    DDTDAY=tranwrd(DDTDAY,'T',' ');
+	keep &keepvar.;
+run;
+
+
+proc sort data=final;
+    by USUBJID PARAMN VISITNUM ADTC;
+run;
+
+%mattrib (inds=final, outds=final_1, dsname=ADPE, ddtfile=adms, ddtlib=derived);
+
+data derived.adpe(label='Physical Examination Analysis Dataset');
+	set final_1;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
