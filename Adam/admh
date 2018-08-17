@@ -1,0 +1,190 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: ADMH.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/15 07:26:29 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNPS0322
+PURPOSE        : derived ADMH
+INPUT FILES    : raw.mh, sg, derived.adsl
+OUTPUT FILES   : derived.admh
+MACROS USED    : %mc_clrup, %idvar %isodt %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+/*clear the work dateset**/
+%mc_clrup;
+
+%let progname=admh;
+
+/**log output**/
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+**keep the needed variables;
+proc sql noprint;
+	select strip(itmname) into :kpadmh separated by ' ' from derived.adms where memname='ADMH';
+quit;
+
+%put &kpadmh.;
+
+*raw data;
+%idvar(in=raw.mh, out=mh_);
+%idvar(in=raw.sg, out=sg_);
+
+proc import datafile= "&PROJPATH.\Data\Import\SYBE-PD008_coding results_14Aug2018_14Aug2018.xlsx"
+	dbms=excel out=mhcd_ replace;
+	range="既往病史$A3:N300";
+	getnames=yes;
+run;
+
+proc import datafile= "&PROJPATH.\Data\Import\SYBE-PD008_coding results_14Aug2018_14Aug2018.xlsx"
+	dbms=excel out=sgcd_ replace;
+	range="手术史$A3:N300";
+	getnames=yes;
+run;
+
+data mhcd1;
+	set mhcd_(rename=(RecordPosition=RecordPosition_ mhterm=mhterm_2));
+	length USUBJID $30;
+	USUBJID="SYBE-PD008"||"-"||strip(Subject);
+	RecordPosition=input(RecordPosition_, best.);
+proc sort;
+	by usubjid RecordPosition;;
+run;
+
+data sgcd1;
+	set sgcd_(rename=(RecordPosition=RecordPosition_));
+	length USUBJID $30;
+	USUBJID="SYBE-PD008"||"-"||strip(Subject);
+	RecordPosition=input(RecordPosition_, best.);
+proc sort;
+	by usubjid RecordPosition;;
+run;
+
+proc sort data=mh_;
+	by usubjid RecordPosition;;
+run;
+proc sort data=sg_;
+	by usubjid RecordPosition;;
+run;
+
+data mh_t;
+	merge mh_ mhcd1;
+	by usubjid recordposition;
+	length MHDECOD MHBODSYS $200;
+	MHDECOD=strip(pt_name);
+	MHBODSYS=strip(soc_name);
+	drop llt_name pt_name hlt_name hlgt_name 
+	llt_code pt_code hlt_code hlgt_code soc_code;
+run;
+data sg_t;
+	merge sg_ sgcd1;
+	by usubjid recordposition;
+	length MHDECOD MHBODSYS $200;
+	MHDECOD=strip(pt_name);
+	MHBODSYS=strip(soc_name);
+	drop llt_name pt_name hlt_name hlgt_name 
+	llt_code pt_code hlt_code hlgt_code soc_code;
+run;
+
+
+data mh1;
+	set mh_t(in=a) sg_t(in=b);
+	length part $10;
+
+	if a then part='mh';
+	else if b then part='sg';
+run;
+
+data mh2;
+	set mh1(rename=(MHTERM=MHTERM_));
+	where (part='mh' and MHYN='是') or (part='sg' and SGYN='是');
+	length MHCAT $200. MHTERM $200. MHSTDTC $19. MHENDTC $19. 
+	MHENRF $20. MHCMYN $10. MHRSN $200.;
+
+	if part='mh' and MHYN='是' then do;
+		MHCAT="既往病史";
+		MHTERM=MHTERM_;
+		%isodt(indt=MHSTDAT_RAW, outdt=MHSTDTC);
+		%isodt(indt=MHENDAT_RAW, outdt=MHENDTC);
+		MHENRF=MHONGO;
+		MHCMYN=MHCURM;
+		MHRSN='';
+	end;
+
+	else if part='sg' and SGYN='是' then do;
+		MHCAT='既往手术史';
+		MHTERM=SGTERM;
+		%isodt(indt=SGDAT_RAW, outdt=MHSTDTC);
+		MHENDTC='';*for SGDAT;
+		MHENRF='';
+		MHCMYN='';
+		MHRSN=SGRSN;
+	end;
+run;
+
+data mh3;
+	set mh2;
+proc sort;
+	by usubjid;
+run;
+
+proc sort data=derived.adsl out=adsl_;
+	by usubjid;
+run;
+
+data mh4;
+	merge mh3(in=a) adsl_(drop=MHTERM);
+	by usubjid;
+	if a;
+	length SYS COD DSOCPT $200.;
+
+	*sys, and cod for concatenation;
+	if MHBODSYS='' then SYS='未编码';
+	else SYS=MHBODSYS;
+
+	if MHDECOD='' then COD='未编码';
+	else COD=MHDECOD;
+
+	*DSOCPT;
+	DSOCPT = strip(SYS) || '/^n^w^w' || strip(COD) || '/^n^w^w^w^w' || strip(MHTERM);
+run;
+
+
+data mh5_kp;
+	set mh4;
+	keep &kpadmh.;
+run;
+
+proc sort data=mh5_kp out=final;
+	by STUDYID USUBJID MHTERM MHSTDTC MHENDTC;
+run;
+
+
+*MARRTIB;
+%mattrib ( 		 inds    = final ,
+                 ddtfile = adms  ,
+                 outds   = admh ,
+                 dsname  = ADMH ,
+                 ddtlib  = DERIVED  ,
+                 header  = NO    , 
+                 dlabel  = 'Medical History Analysis Dataset'   ,
+                 cleanup = YES   );
+
+
+data derived.admh(label='Medical History Analysis Dataset');
+	set admh;
+proc sort;
+	by STUDYID USUBJID MHTERM MHSTDTC MHENDTC;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
