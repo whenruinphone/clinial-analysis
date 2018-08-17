@@ -1,0 +1,266 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: adpc.sas,v $
+REV/REV        : $Revision: 1.3 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : derive DERIVED.ADPC dataset
+INPUT FILES    : raw.pk1, raw.pk2, raw.sv, raw.uns, derived.adsl
+OUTPUT FILES   : derived.adpc
+MACROS USED    : %mc_clrup, %mapavisit, %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+**clear the work dateset**;
+%mc_clrup; 
+
+%let progname=adpc;
+
+
+**log output**;
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+ 
+**ADPC variables list;
+proc sql noprint;
+	select strip(itmname) into :adpcvars separated by ' ' from derived.adms where memname='ADPC';
+quit;
+
+%put &adpcvars.;
+
+
+**import PK DATA file ;
+proc import datafile="&PROJPATH\Data\Import\D161226CSP_空腹组血药浓度数据_万略_20180126.xlsx" 
+	dbms=excel 
+	out=pcdata_k replace;
+    getnames=yes; 
+quit;
+
+proc import datafile="&PROJPATH\Data\Import\D161226CSP_餐后组血药浓度数据_万略_20180706.xlsx" 
+	dbms=excel 
+	out=pcdata_c replace;
+    getnames=yes; 
+quit;
+
+**transfer data;
+data pc_d;
+    length tpt $20 randnum $9;
+    set pcdata_k(drop=Analyte) pcdata_c(drop=Analyte);
+    
+	tpt='服药后'||strip(put(Nominal_Time,best.))||'h';
+	randnum=strip(subject);
+
+	if index(Concentration__ng_ml_,'BLQ')^=0 then n=0;
+	else n=1;
+run;
+
+**sort data;
+proc sort data=pc_d;
+    by randnum period Nominal_Time;
+run;
+
+data pc_d1;
+    set pc_d end=last; 
+    if _n_>1 then do;
+    pt=_n_-1;
+    set pc_d( keep=n rename=(n=ln)) point=pt ;
+    end;
+    else ln=0;
+run;
+
+data pc_d2;
+    set pc_d1;
+	by randnum period Nominal_Time;
+    retain flag;
+    if first.period then flag=1;
+	else if n^=ln then flag=flag+1;
+
+	if flag=1 then aval=0;
+	else if flag=2 then aval=input(Concentration__ng_ml_,best.);
+	else if flag=3 then aval=.;
+	else if flag>3 then put 'CP WAR' 'NING-subject=' randnum 'has issue data,please check!';
+run;
+
+proc sort data=pc_d2(keep=randnum flag) out=pcfl;
+    by randnum flag;
+run;
+
+data pcfl1;
+    set pcfl;
+	by randnum flag;
+
+	if last.randnum;
+	rename flag=pcflag;
+run;
+
+data pc_d3;
+    merge pc_d2(in=a) pcfl1;
+	by randnum;
+	if a;
+
+	if pcflag=1 then aval=.;
+run;
+
+**sort data;
+proc sort data=pc_d3;
+    by randnum period tpt;
+run;
+
+**set RAW.PK1 and RAW.PK2;
+data pk;
+    length source $10;
+    set raw.pk1(in=a) raw.pk2(in=b);
+
+	if a then source="pk1";
+	if b then source="pk2";
+	date=input(compress(pkdat_raw),date9.);
+run;
+
+**set RAW.SV and RAW.UNS;
+data sv;
+    set raw.sv raw.uns(rename=(unsdat_raw=visdat_raw));
+	date=input(compress(visdat_raw),date9.);
+run;
+
+**sort data;
+proc sort data=pk out=pk_1(where=(pknd='' or pkperf='是') drop=folder folderseq InstanceName);
+    by subject date;
+run;
+
+**sort data;
+proc sort data=sv out=sv_1(where=(date^=.) keep=subject date InstanceName folder folderseq) nodupkey;
+    by subject date;
+run;
+
+**merge data to get the visit;
+data adpc_1;
+    length usubjid $30 pcyn $200 pctpt $50 paramcd pctim $8 param $200 pcdtc $10;  
+    merge pk_1(in=a) sv_1;
+	by subject date;
+	if a;
+
+	usubjid=strip(project)||'-'||strip(subject);
+	paramcd='CONCENT';
+	param='Pharmacokinetics Concentrations';
+	paramn=1;
+	pctpt=scan(pktpt,1,'（');
+	pctptn=pktpt_std;
+
+	if source="pk1" then do;
+	  if pknd='未做' then pcyn='否，'||strip(PKNDESP);
+      else pcyn='是';
+	end;
+	else do;
+	  if pkperf='未做' then pcyn='否，'||strip(PKPERFN);
+      else pcyn='是';
+	end;
+
+	if date^=. then pcdtc=put(date,yymmdd10.);
+	else pcdtc='';
+
+	if pktim^='' then pctim=strip(pktim);
+	else pctim='';
+
+	keep usubjid paramcd param paramn pctpt pctptn pcyn pcdtc pctim Folder InstanceName folderseq;
+run;
+
+**sort data;
+proc sort data=adpc_1;
+    by usubjid;
+run;
+
+**variables from ADSL;
+proc sort data=derived.adsl out=adsl_(keep=STUDYID USUBJID SUBJID SITENAM SCRNUM SCRNFL RANDNUM FASFL SAFFL PKFL BEFL COMPFL AGE 
+                                           SEX TRTGRP TRTGRPN TRTSEQP TRTSEQPN TRT01P TRT01PN TRT02P TRT02PN TRTSEQA TRTSEQAN 
+                                           TRT01A TRT01AN TRT02A TRT02AN TR01SDT TR01STM TR01EDT TR01ETM TR01SDTC TR01EDTC 
+                                           TR02SDT TR02STM TR02EDT TR02ETM TR02SDTC TR02EDTC EOSTU);
+     by usubjid;
+run;
+
+**merge with ADSL;
+data adpc_2;
+    length ddtday $50 tpt $20;
+    merge adpc_1(in=a) adsl_;
+	by usubjid;
+	if a;
+
+	%mapavisit;
+
+	if pcdtc^='' then adt=input(compress(pcdtc),yymmdd10.);
+
+    if .<adt<tr01sdt then pcdy=adt-tr01sdt;
+	else if adt>=tr01sdt>. then pcdy=adt-tr01sdt+1;
+
+	if pcdtc ne '' then do;
+      if pcdy ne . then ddtday=strip(tranwrd(pcdtc,'T',' '))||' ('||strip(put(pcdy,best.))||')';
+	  else ddtday=strip(tranwrd(pcdtc,'T',' '))||' (-)';
+	end;
+
+	if pctpt in ('服药前30min内','餐后至服药前') then tpt='服药后0h';
+	else tpt=pctpt;
+
+	if find(visit,'第一周期') then period=1;
+	else period=2;
+run;
+
+**sort data;
+proc sort data=adpc_2;
+    by randnum period tpt;
+run;
+
+**merge data;
+data adpc_3;
+    length trta $40 aperiodc $20 avalc $25 avalu $20 atpt $50;
+    merge adpc_2(in=a) pc_d3(in=b);
+	by randnum period tpt;
+	if a and b;
+
+	aperiod=period;
+	atptn=pctptn;
+	avalc=Concentration__ng_ml_;
+	avalu='ng/ml';
+
+	if aperiod=1 then aperiodc='第一周期';
+	else if aperiod=2 then aperiodc='第二周期';
+	else aperiodc='';
+
+	if period=1 then trta=trt01a;
+	else if period=2 then trta=trt02a;
+	else trta='';
+
+	if trta='受试制剂' then trtan=1;
+	else if trta='参比制剂' then trtan=2;
+	else trtan=.;
+
+    if strip(put(Nominal_Time,best.))='0' then atpt='给药前';
+	else atpt=strip(put(Nominal_Time,best.))||'h';
+
+	keep &adpcvars.;
+run;
+
+
+%mattrib (inds=adpc_3, 
+          ddtfile=ADMS, 
+          outds=adpc, 
+          dsname=ADPC, 
+          ddtlib=DERIVED);
+
+data derived.adpc(label= 'PK Concentrations Analysis Dataset' );
+	set adpc;
+run;
+
+proc sort data=derived.adpc;
+	by studyid usubjid paramn aperiod visitnum pctptn;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
