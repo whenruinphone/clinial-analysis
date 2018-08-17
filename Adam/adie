@@ -1,0 +1,150 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: ADIE.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNPS0322
+PURPOSE        : derived ADIE
+INPUT FILES    : raw.ie, derived.adsl
+OUTPUT FILES   : derived.adie
+MACROS USED    : %mc_clrup, %idvar %mapavisit %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+/*clear the work dateset**/
+%mc_clrup;
+
+%let progname=adie;
+
+/**log output**/
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+**keep the needed variables;
+proc sql noprint;
+	select strip(itmname) into :kpadie separated by ' ' from derived.adms where memname='ADIE';
+quit;
+
+%put &kpadie.;
+
+*raw data;
+%idvar(in=raw.ie, out=ie_);
+
+proc sort data=ie_ out=ie1;
+	by usubjid;
+run;
+
+proc sort data=derived.adsl out=adsl_;
+	by usubjid;
+run;
+
+data ie2;
+	merge ie1 adsl_;
+	by usubjid;
+	if ieyn^='';
+run;
+
+*VISIT;
+data ie3;
+	set ie2;
+	%mapavisit;
+proc sort;
+	by usubjid visitnum;
+run;
+
+data ie_y ie_1 ie_2;
+	set ie3;
+	if IECAT='' then output ie_y;
+	else if IECAT='入选标准' then output ie_1;
+	else if IECAT='排除标准' then output ie_2;
+run;
+
+%macro fyie(ind=, otd=, os=, txt=);
+proc sort data=&ind. out=ietemp;
+	by usubjid visitnum ietestcd;
+run;
+data ie1_1_ietemp;
+	set ietemp(rename=(ietestcd_raw=ietestcd_raw_or));
+	length ietestcd_raw $200;
+	ietestcd_raw=ietestcd_raw_or;
+run;
+
+data ie1_1;
+	length &os. $200;
+	set ie1_1_ietemp;
+	by usubjid visitnum;
+
+	retain &os.;
+
+	ietestcd_raw="&txt."||strip(ietestcd_raw);
+
+	if first.usubjid then &os.=strip(ietestcd_raw);
+	else &os.=strip(&os.)||"， "||strip(ietestcd_raw);
+run;
+
+data &otd.;
+	set ie1_1;
+	by usubjid visitnum;
+	if last.visitnum;
+proc sort;
+	by usubjid visitnum;
+run;
+%mend fyie;
+%fyie(ind=ie_1, otd=ie1_f, os=ores1, txt=%str(入选标准));
+%fyie(ind=ie_2, otd=ie2_f, os=ores2, txt=%str(排除标准));
+
+proc sort data=ie_y out=iey_f(rename=(ietestcd_raw=ietestcd_raw_or));
+	by usubjid visitnum;
+run;
+
+data ie4;
+	merge iey_f ie1_f ie2_f;
+	by usubjid visitnum;
+	length inexyn $10 inexores $200;
+
+	if (strip(ores1)^='' and strip(ores1)^='') or (strip(ores1)='' and strip(ores2)^='') 
+	then inexores=strip(ores1)||"/"||strip(ores2);
+	if strip(ores1)^='' and strip(ores2)='' then inexores=strip(ores1);
+
+	if inexores^='' then inexyn='否';
+	else inexyn='是';
+run;
+
+data ie5_kp;
+	set ie4;
+	keep &kpadie.;
+run;
+
+proc sort data=ie5_kp out=final;
+	by STUDYID USUBJID VISITNUM;
+run;
+
+
+*MARRTIB;
+%mattrib ( 		 inds    = final ,
+                 ddtfile = adms  ,
+                 outds   = adie ,
+                 dsname  = adiE ,
+                 ddtlib  = DERIVED  ,
+                 header  = NO    , 
+                 dlabel  = 'Inclusion/Exclusion Criterion Analysis Dataset'   ,
+                 cleanup = YES   );
+
+
+data derived.adie(label='Inclusion/Exclusion Criterion Analysis Dataset');
+	set adie;
+proc sort;
+	by STUDYID USUBJID VISITNUM;
+run;
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
