@@ -1,0 +1,60 @@
+
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mc_clrup.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/02/05 06:47:25 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :
+PURPOSE         : add page in footnote Program
+INPUT FILES     : 
+OUTPUT FILES    :
+MACROS USED     :
+NOTES           : add page for Study.                                           
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+* macro to clear work directory and reset titles/footnotes/options;
+
+  %macro mc_clrup(type=t,lab=NO);
+      title;footnote;
+      proc datasets lib=work nodetails nolist;
+/*        save styles;*/
+      run;quit;
+      %global tfldte;
+      data _null_;
+        call symput('tfldte',put(today(),worddate.));
+      run;
+      %put &type;
+
+
+     data _null_;
+	     length day $20.;
+	     day="&sysdate9.";
+		   day=substr(day,1,2)||' '||(substr(day,3,1))||lowcase(substr(day,4,2))||' '||substr(day,6,4);
+		   call symput("day",trim(left(day)));
+	   run;
+
+	  ** creates global study header titles **;
+      %if %upcase(&type)=T or
+          %upcase(&type)=L %then %do;
+
+  		title1 j=l font=arial height=10.2 pt "&oclient"
+               j=c font=arial height=10.2 pt "CONFIDENTIAL"
+               j=r font=arial height=10.2 pt "Date &day";
+        title2 j=l font=arial height=10.2 pt "&project"
+		       j=c font=arial height=10.2 pt "&oversion"
+        %if "&lab"="NO" %then %do;
+	           j=r font=arial height=10.2 pt 'Page ^{pageof}';
+	    title3 j=c font=arial height=10.2 pt "&border";
+        %end;
+		%else %do;
+                j=r font=arial height=10.2 pt 'Page @{pageof}';
+		title3 j=c font=arial height=10.2 pt "&border1";
+        ods escapechar='@';
+        %end;
+      %end;
+  %mend mc_clrup;
+
