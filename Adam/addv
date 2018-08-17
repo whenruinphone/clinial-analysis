@@ -1,0 +1,184 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: addv.sas,v $
+REV/REV        : $Revision: 1.2 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/08/10 09:20:43 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : derive DERIVED.ADDV dataset
+INPUT FILES    : PD data
+OUTPUT FILES   : derived.addv
+MACROS USED    : %mc_clrup, %mattrib
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+**clear the work dateset**;
+%mc_clrup; 
+
+%let progname=addv;
+
+**log output**;
+proc printto new log="&adamlog.\&progname..log" new;
+run;
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+**ADPC variables list;
+proc sql noprint;
+	select strip(itmname) into :addvvars separated by ' ' from derived.adms where memname='ADDV';
+quit;
+
+%put &addvvars.;
+
+
+**import PD DATA file ;
+proc import datafile="&PROJPATH\Data\Import\利培酮偏离汇总-20180806.xls" 
+	dbms=excel 
+	out=pddata replace;
+    sheet="方案依从表$a2:k296";
+    getnames=no; 
+quit;
+
+**transfer data;
+data pd;
+    length USUBJID $30 DVCAT DVSEV $40 DVSTDTC $10;
+    set pddata;
+    
+	USUBJID='SYBE-PD008-'||strip(f1);
+	DVCAT=strip(f6);
+	DVSEV=strip(f7);
+	DVSTDTC=strip(put(f3,yymmdd10.));
+
+    %macro splitvar(var=, varname=, max_vars=);  
+
+      %do j = 1 %to &max_vars; 
+        attrib &varname%eval(&j) length=$200;   
+        do ctr = 1 to 200;
+          if length(&var)<=200 then do;
+            &varname%eval(&j)=strip(&var);
+            &var = '';
+            ctr = 200;
+          end;
+          else if length(&var)>200 then do;
+            if compress(substr(&var, 202-ctr, 1), '','kg') ne '' and substr(&var, 202-ctr, 1) ne ' ' and substr(&var, 203-ctr, 1) ne ' ' then do;   
+              &varname%eval(&j)=substr(&var,1,201-ctr+1);
+              &var = substr(&var., 202-ctr+1);
+              ctr = 200;
+            end;
+          end;
+        end;
+      %end;
+
+      drop ctr ;
+
+    %mend splitvar;
+
+    %splitvar(var=f8, varname=DVTERM, max_vars=3);
+run;
+
+
+**sort data;
+proc sort data=pd;
+    by USUBJID;
+run;
+
+**variables from ADSL;
+proc sort data=derived.adsl out=adsl_(keep=STUDYID USUBJID SUBJID SITENAM SCRNUM SCRNFL RANDNUM FASFL SAFFL PKFL BEFL COMPFL AGE 
+                                           SEX TRTGRP TRTGRPN TRTSEQP TRTSEQPN TRT01P TRT01PN TRT02P TRT02PN TRTSEQA TRTSEQAN 
+                                           TRT01A TRT01AN TRT02A TRT02AN TR01SDT TR01STM TR01EDT TR01ETM TR01SDTC TR01EDTC 
+                                           TR02SDT TR02STM TR02EDT TR02ETM TR02SDTC TR02EDTC EOSTU);
+     by USUBJID;
+run;
+
+**merge with ADSL;
+data addv_1;
+    length VISIT DDTDAY $50;
+    merge pd(in=a rename=(DVTERM1=DVTERM DVTERM2=DVTERM1 DVTERM3=DVTERM2)) adsl_(in=b);
+	by usubjid;
+	if a and b;
+
+	if DVSTDTC^='' then adt=input(compress(DVSTDTC),yymmdd10.);
+
+    if .<adt<tr01sdt then DVSTDY=adt-tr01sdt;
+	else if adt>=tr01sdt>. then DVSTDY=adt-tr01sdt+1;
+
+	if DVSTDTC ne '' then do;
+      if DVSTDY ne . then DDTDAY=strip(tranwrd(DVSTDTC,'T',' '))||' ('||strip(put(DVSTDY,best.))||')';
+	  else DDTDAY=strip(tranwrd(DVSTDTC,'T',' '))||' (-)';
+	end;
+
+	if f4='Day-14~Day-2' then do;
+      VISIT='筛选期 D-14~-2';
+	  VISITNUM=1;
+	end;
+	else if f4='Day-1' then do;
+      VISIT='筛选期 D-1';
+	  VISITNUM=2;
+	end;
+	else if f4='Day1' then do;
+      VISIT='第一周期 D1';
+	  VISITNUM=3;
+	end;
+	else if f4='Day2' then do;
+      VISIT='第一周期 D2';
+	  VISITNUM=4;
+	end;
+	else if f4='Day3' then do;
+      VISIT='第一周期 D3';
+	  VISITNUM=5;
+	end;
+	else if f4='Day4' then do;
+      VISIT='第一周期 D4';
+	  VISITNUM=6;
+	end;
+	else if f4 in ('Day12~Day14','Day14') then do;
+      VISIT='第二周期 D12~14';
+	  VISITNUM=7;
+	end;
+	else if f4='Day15' then do;
+      VISIT='第二周期 D15';
+	  VISITNUM=8;
+	end;
+	else if f4='Day16' then do;
+      VISIT='第二周期 D16';
+	  VISITNUM=9;
+	end;
+	else if f4='Day17' then do;
+      VISIT='第二周期 D17';
+	  VISITNUM=10;
+	end;
+	else if f4='Day18' and EOSTU='完成试验' then do;
+      VISIT='第二周期 D18';
+	  VISITNUM=11;
+	end;
+	else if f4='Day18' and EOSTU='提前退出' then do;
+      VISIT='提前退出';
+	  VISITNUM=12;
+	end;
+
+	keep &addvvars.;
+run;
+
+
+%mattrib (inds=addv_1, 
+          ddtfile=ADMS, 
+          outds=addv, 
+          dsname=ADDV, 
+          ddtlib=DERIVED);
+
+data derived.addv(label= 'Protocol Deviations Analysis Dataset' );
+	set addv;
+run;
+
+proc sort data=derived.addv;
+	by studyid usubjid dvcat dvterm dvterm1 dvterm2 dvstdtc;
+run;
+
+
+%put PROGRAM %upcase(&progname).sas run by &sysuserid on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
