@@ -1,0 +1,524 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_demog.sas,v $
+REV/REV        : $Revision: 1.5 $
+AUTH           : $Author: yu_zhi0701 $
+REV DATE       : $Date: 2018/08/20 06:10:54 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY\HCSYCNNE0322
+PURPOSE        : Create 表14.1.2I 空腹试验人口统计学和其他基线特征总结 – 全分析集
+						表14.1.2II 餐后试验人口统计学和其他基线特征总结 – 全分析集
+INPUT FILES    : derived.adsl 
+OUTPUT FILES   : t_14_1_2I_demog, t_14_1_2II_demog
+MACROS USED    : %mc_clrup, %mc_addpn, %mc_gtbtf, %mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+*clean out dataset;
+%mc_clrup;
+%let progname=t_demog;
+%let dataset=%str(ADSL);
+
+proc printto log="&tablog\&progname..log" new;
+run;
+
+%macro trt(TRTGRPN=, outname=);
+*get p value and stat;
+%i_test(outp=pdemog, num=1, TRTGRPN=&TRTGRPN);
+
+*calculate 随机入组人数;
+proc sql noprint;
+	select count(usubjid) into : pop1 from derived.adsl where fasfl='是' and (TRTGRPN=&TRTGRPN) and TRTSEQPN=1 ;
+	select count(usubjid) into : pop2 from derived.adsl where fasfl='是' and (TRTGRPN=&TRTGRPN) and TRTSEQPN=2 ;
+	select count(usubjid) into : pop3 from derived.adsl where fasfl='是' and (TRTGRPN=&TRTGRPN) and TRTSEQPN in (1,2) ;
+quit;
+
+*fetch and sort data from derived.adsl;
+data adsl;
+	set derived.adsl(rename=(mhterm=mhterm_1 mhterm1=mhterm_2));
+	length mhterm1-mhterm7 $200;
+	if fasfl='是' and TRTGRPN=&TRTGRPN;
+
+	mhterma=strip(mhterm_1)||strip(mhterm_2);
+	mhterm1=strip(scan(scan(mhterma, 2, ':'), 1, ';'));
+	mhterm2=strip(scan(scan(mhterma, 3, ':'), 1, ';'));
+	mhterm3=strip(scan(scan(mhterma, 4, ':'), 1, ';'));
+	mhterm4=strip(scan(scan(mhterma, 5, ':'), 1, ';'));
+	mhterm5=strip(scan(scan(mhterma, 6, ':'), 1, ';'));
+	mhterm6=strip(scan(scan(mhterma, 7, ':'), 1, ';'));
+	mhterm7=strip(scan(scan(mhterma, 8, ':'), 1, ';'));
+	
+	array a{7} mhterm1 mhterm2 mhterm3 mhterm4 mhterm5 mhterm6 mhterm7;
+	array b{7} mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n;	
+	do i=1 to 7;
+		if a{i}='' then b{i}=3;
+		else if a{i}='无' then b{i}=2;
+		else b{i}=1;
+	end;
+
+	if sex='' then sexn=3;
+	if race='' then racen=3;
+
+	if SMKHIS='有' then SMKN=1;
+	else if SMKHIS='无' then SMKN=2;
+	else if SMKHIS='' then SMKN=3;
+	if find(SMKTXT,'≤5支') then SMKNN=1;
+	else if find(SMKTXT,'>5') then SMKNN=2;
+	else if find(SMKTXT,'戒烟') then SMKNN=3;
+
+	if DRKHIS='有' then DRKN=1;
+	else if DRKHIS='无' then DRKN=2;
+	else if DRKHIS='' then DRKN=3;
+	if find(DRKTXT,'≤14') then DRKNN=1;
+	else if find(DRKTXT,'>14') then DRKNN=2;
+	else if find(DRKTXT,'戒酒') then DRKNN=3;
+
+	if LACTPD='是' then LACTN=1;
+	else if LACTPD='否' then LACTN=2;
+	if PREGHIS='是' then PREGN=1;
+	else if PREGHIS='否' then PREGN=2;
+
+	keep TRTSEQPN usubjid age sexn sex race racen HEIGHTBL WEIGHTBL BMIBL mhterm:
+	SMKHIS SMKTXT SMKN SMKNN DRKHIS DRKTXT DRKN DRKNN LACTPD LACTN PREGHIS PREGN fasfl;
+run;
+
+*add for '合计';
+data adsl2;
+	set adsl;
+	output;
+	TRTSEQPN=3;
+	output;
+run;
+
+*count 合计 number;
+%macro pop(data=, num=, order=);
+proc sql noprint;
+	create table &data as select count(&num) as count, TRTSEQPN, &order as order, 4 as &num
+	from adsl2 where &num ne .
+	group by TRTSEQPN
+	order by TRTSEQPN;
+quit;
+%mend;
+%pop(data=_pop1, num=sexn, order=2);
+%pop(data=_pop2, num=racen, order=3);
+%pop(data=_pop3, num=mhterm1n, order=7);
+%pop(data=_pop4, num=mhterm2n, order=8);
+%pop(data=_pop5, num=mhterm3n, order=9);
+%pop(data=_pop6, num=mhterm4n, order=10);
+%pop(data=_pop7, num=mhterm5n, order=11);
+%pop(data=_pop8, num=mhterm6n, order=12);
+%pop(data=_pop9, num=mhterm7n, order=13);
+%pop(data=_pop10, num=SMKN, order=14);
+%pop(data=_pop11, num=DRKN, order=15);
+%pop(data=_pop12, num=LACTN, order=16);
+%pop(data=_pop13, num=PREGN, order=17);
+
+*calculate cat number;
+%macro pop2(data=, num=, num2=, order=);
+proc freq data=adsl2 noprint;
+	table &num2*TRTSEQPN/out=&data (where=(&num ne .) drop=percent);
+run;
+
+data &data;
+	set &data;
+	order=&order;
+run;
+
+%mend;
+%pop2(data=pop1, num=sexn, num2=sexn, order=2);
+%pop2(data=pop2, num=racen, num2=racen, order=3);
+%pop2(data=pop3, num=mhterm1n, num2=mhterm1n, order=7);
+%pop2(data=pop4, num=mhterm2n, num2=mhterm2n, order=8);
+%pop2(data=pop5, num=mhterm3n, num2=mhterm3n, order=9);
+%pop2(data=pop6, num=mhterm4n, num2=mhterm4n, order=10);
+%pop2(data=pop7, num=mhterm5n, num2=mhterm5n, order=11);
+%pop2(data=pop8, num=mhterm6n, num2=mhterm6n, order=12);
+%pop2(data=pop9, num=mhterm7n, num2=mhterm7n, order=13);
+%pop2(data=pop10, num=SMKN, num2=SMKN*SMKNN, order=14);
+%pop2(data=pop11, num=DRKN, num2=DRKN*DRKNN, order=15);
+%pop2(data=pop12, num=LACTN, num2=LACTN, order=16);
+%pop2(data=pop13, num=PREGN, num2=PREGN, order=17);
+
+proc freq data=adsl2 noprint;
+	table SMKN*TRTSEQPN/out=pop14 (where=(SMKN = 1) drop=percent);
+	table DRKN*TRTSEQPN/out=pop15 (where=(DRKN = 1) drop=percent);
+run;
+
+data popall;
+	set _pop1-_pop13 pop1-pop13 pop14(in=a) pop15(in=b);
+	if a then order=14;
+	if b then order=15;
+
+	if not a and SMKN=1 and SMKNN=. then delete;
+	if not b and DRKN=1 and DRKNN=. then delete;
+run;
+
+proc sort data=popall;
+	by TRTSEQPN order sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+*create temple;
+data temple;
+	do TRTSEQPN=1 to 3;
+%macro temp(num=, order=);
+		do order=&order;
+			do &num=1 to 4;
+				COUNT=0;
+				output;
+			end;;
+		end;
+		&num=.;
+%mend;
+%temp(num=sexn, order=2);
+%temp(num=racen, order=3);
+%temp(num=mhterm1n, order=7);
+%temp(num=mhterm2n, order=8);
+%temp(num=mhterm3n, order=9);
+%temp(num=mhterm4n, order=10);
+%temp(num=mhterm5n, order=11);
+%temp(num=mhterm6n, order=12);
+%temp(num=mhterm7n, order=13);
+
+%macro temp2(num1=, num2=, order=);
+		do order=&order;
+			do &num1=1;
+				do &num2=1 to 3;
+					COUNT=0;
+					output;
+				end;
+			end;
+			&num2=.;
+			do &num1=1 to 2, 4;
+				COUNT=0;
+				output;
+			end;;
+		end;
+		&num1=.;
+%mend;
+%temp2(num1=SMKN, num2=SMKNN, order=14);
+%temp2(num1=DRKN, num2=DRKNN, order=15);
+
+%macro temp3(num=, order=);
+		do order=&order;
+			do &num=1 to 2, 4;
+				COUNT=0;
+				output;
+			end;;
+		end;
+		&num=.;
+%mend;
+%temp3(num=LACTN, order=16);
+%temp3(num=PREGN, order=17);
+	end;
+
+run;
+
+proc sort data=temple;
+	by TRTSEQPN order sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+*merge to get all number;
+data allpop;
+	merge temple popall;
+	by TRTSEQPN order sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+	length cp $200;
+	if TRTSEQPN=1 then pect=100*count/&pop1;
+	else if TRTSEQPN=2 then pect=100*count/&pop2;
+	else if TRTSEQPN=3 then pect=100*count/&pop3;
+	if pect=0 then cp=put(count, 5.);
+	else if 0<pect<10 then cp=put(count, 5.)||'   ('||strip(put(pect,5.1))||')';
+	else if 10<=pect<100 then cp=put(count, 5.)||'  ('||strip(put(pect,5.1))||')';
+	else if pect=100 then cp=put(count, 5.)||' (100)';
+run;
+
+proc sort data=allpop;
+	by order sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+proc transpose data=allpop out=allpop2 prefix=a;
+	var cp;
+	id TRTSEQPN;
+	by order sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+*get variable for table;
+data allpop3;
+	set allpop2;
+	length col1 col2 col3 col4 $200;
+	if order=2 and sexn=1 then col1='性别[n(%)]^n^w男';
+	else if order=2 and sexn=2 then col1='^w女';
+	else if order=2 and sexn=3 then col1='^w缺失';
+	else if order=3 and racen=1 then col1='民族[n(%)]^n^w汉族';
+	else if order=3 and racen=2 then col1='^w其他';
+	else if order=3 and racen=3 then col1='^w缺失';
+	else if order=7 and mhterm1n=1 then col1='用药史[n(%)]^n^w有';
+	else if order=8 and mhterm2n=1 then col1='过敏史[n(%)]^n^w有';
+	else if order=9 and mhterm3n=1 then col1='家族病史[n(%)]^n^w有';
+	else if order=10 and mhterm4n=1 then col1='临床试验史[n(%)]^n^w有';
+	else if order=11 and mhterm5n=1 then col1='输血/捐血史[n(%)]^n^w有';
+	else if order=12 and mhterm6n=1 then col1='药物滥用史[n(%)]^n^w有';
+	else if order=13 and mhterm7n=1 then col1='静脉穿刺耐受情况[n(%)]^n^w有';
+	else if order=14 and SMKN=1 and SMKNN=. then col1='吸烟史^n^w有';
+	else if order=14 and SMKN=1 and SMKNN=1 then col1='^w^w目前平均每日吸烟支数<=5支';
+	else if order=14 and SMKN=1 and SMKNN=2 then col1='^w^w目前平均每日吸烟支数>5支';
+	else if order=14 and SMKN=1 and SMKNN=3 then col1='^w^w戒烟';
+	else if order=15 and DRKN=1 and DRKNN=. then col1='饮酒史^n^w有';
+	else if order=15 and DRKN=1 and DRKNN=1 then col1='^w^w目前平均每周饮酒量<=14个单位';
+	else if order=15 and DRKN=1 and DRKNN=2 then col1='^w^w目前平均每周饮酒量>14个单位';
+	else if order=15 and DRKN=1 and DRKNN=3 then col1='^w^w戒酒';
+	else if order in (7:15) and (mhterm1n=2 or mhterm2n=2 or mhterm3n=2 or mhterm4n=2 or mhterm5n=2 or mhterm6n=2 or mhterm7n=2 or
+	SMKN=2 or DRKN=2) then col1='^w无';
+	else if order in (7:13) and (mhterm1n=3 or mhterm2n=3 or mhterm3n=3 or mhterm4n=3 or mhterm5n=3 or mhterm6n=3 or mhterm7n=3)
+	then col1='^w未知';
+	else if order=16 and LACTN=1 then col1='哺乳期 [n(%)]^n^w是';
+	else if order=17 and PREGN=1 then col1='妊娠史 [n(%)]^n^w是';
+	else if order in (16:17) and (LACTN=2 or PREGN=2) then col1='^w否';
+	else if sexn=4 or racen=4 or mhterm1n=4 or mhterm2n=4 or mhterm3n=4 or mhterm4n=4 or mhterm5n=4 or mhterm6n=4 or mhterm7n=4 or
+	SMKN=4 or DRKN=4 or LACTN=4 or PREGN=4 then col1='^w合计';
+
+	col2=a1;
+	col3=a2;
+	col4=a3;
+run;
+
+*get dp;
+proc sql noprint;
+	create table dp as select max(lengthn(scan(strip(put(age, best.)),2,'.'))) as dpa,
+	max(lengthn(scan(strip(put(HEIGHTBL, best.)),2,'.'))) as dph,
+	max(lengthn(scan(strip(put(WEIGHTBL, best.)),2,'.'))) as dpw,
+	max(lengthn(scan(strip(put(BMIBL, best.)),2,'.'))) as dpb, fasfl
+	from adsl
+	group by fasfl
+	order by fasfl;
+quit;
+
+proc sort data=adsl;
+	by fasfl usubjid;
+run;
+
+%macro mean(data1=, data2=, data3=, dp=, var=);
+	data &data1;
+		merge adsl2 dp;
+		by fasfl;
+		dp0=strip(put(20+&dp/10,best.));
+		dp1=strip(put(20+(&dp+1)/10,best.));
+		dp2=strip(put(20+(&dp+2)/10,best.));
+		r0=10**(-&dp);
+		r1=10**(-&dp-1);
+		r2=10**(-&dp-2);
+		array a{3} r0 r1 r2;
+		array b{3} dp0 dp1 dp2;
+		do i=1 to 3;
+			if a{i}<0.0001 then a{i}=0.0001;
+			if input(b{i},best.)>20.4 then b{i}='20.4';
+		end;
+	run;
+
+	proc sort data=&data1;
+		by TRTSEQPN;
+	run;
+
+	*calculate by proc means;
+	proc means data=&data1 noprint;
+		var &var;
+		by TRTSEQPN dp0 dp1 dp2 r0 r1 r2;
+		output out=&data2
+		n=_n
+		mean=_mean
+		std=_sd
+		median=_median
+		min=_min
+		max=_max
+		cv=_cv/autolabel;
+	run;
+
+	data &data3;
+		set &data2;
+		length n_nmiss Mean_SD Median min_max $200;
+
+		if TRTSEQPN=1 then n_nmiss=put(_n,5.)||' ('||strip(put(&pop1-_n,4.))||')';
+		else if TRTSEQPN=2 then n_nmiss=put(_n,5.)||' ('||strip(put(&pop2-_n,4.))||')';
+		else if TRTSEQPN=3 then n_nmiss=put(_n,5.)||' ('||strip(put(&pop3-_n,4.))||')';
+		if _n ne 0 then do;
+			if _n ne 1 then Mean_SD=strip(putn(round(_mean,r1),dp1))||' ('||strip(putn(round(_sd,r2),dp2))||')';
+			else if _n = 1 then Mean_SD=strip(putn(round(_mean,r1),dp1))||' (-)';
+			Median=strip(putn(round(_median,r1),dp1));
+			min_max=strip(putn(round(_min,r0),dp0))||', '||strip(putn(round(_max,r0),dp0));
+		end;
+		Mean_SD=repeat(' ',4-lengthn(scan(strip(put(_mean, best.)),1,'.')))||strip(Mean_SD);
+		Median=repeat(' ',4-lengthn(scan(strip(put(_median, best.)),1,'.')))||strip(Median);
+		min_max=repeat(' ',4-lengthn(scan(strip(put(_min, best.)),1,'.')))||strip(min_max);
+
+		if _n=0 then do;
+			Mean_SD=''; Median=''; min_max='';
+		end;
+	run;
+%mend;
+%mean(data1=age1, data2=age2, data3=age3, dp=dpa, var=age);
+%mean(data1=HEIGHTBL1, data2=HEIGHTBL2, data3=HEIGHTBL3, dp=dph, var=HEIGHTBL);
+%mean(data1=WEIGHTBL1, data2=WEIGHTBL2, data3=WEIGHTBL3, dp=dpw, var=WEIGHTBL);
+%mean(data1=BMIBL1, data2=BMIBL2, data3=BMIBL3, dp=dpb, var=BMIBL);
+
+data allmean;
+	set age3(in=a) HEIGHTBL3(in=b) WEIGHTBL3(in=c) BMIBL3(in=d);
+	if a then order=1;
+	else if b then order=4;
+	else if c then order=5;
+	else if d then order=6;
+run;
+
+proc sort data=allmean;
+	by order;
+run;
+
+proc transpose data=allmean out=allmean2 prefix=a;
+	by order;
+	var n_nmiss Mean_SD Median min_max;
+	id TRTSEQPN;
+run;
+
+data allmean3;
+	set allmean2;
+	length col1-col4 $200;
+	if order=1 and lowcase(_name_)='n_nmiss' then do; order2=1; col1='年龄（周岁）^n^w人数（缺失）'; end;
+	else if order=4 and lowcase(_name_)='n_nmiss' then do; order2=1; col1='身高（cm）^n^w人数（缺失）'; end;
+	else if order=5 and lowcase(_name_)='n_nmiss' then do; order2=1; col1='体重（kg）^n^w人数（缺失）'; end;
+	else if order=6 and lowcase(_name_)='n_nmiss' then do; order2=1; col1='体重指数（kg/m^{super 2}）^n^w人数（缺失）'; end;
+	else if lowcase(_name_)='mean_sd' then do; order2=2; col1='^w平均数（标准差）'; end;
+	else if lowcase(_name_)='median' then do; order2=3; col1='^w中位数'; end;
+	else if lowcase(_name_)='min_max' then do; order2=4; col1='^w最小值，最大值'; end;
+
+	col2=a1;
+	col3=a2;
+	col4=a3;
+run;
+
+data all;
+	set allmean3 allpop3;
+run;
+
+proc sort data=all;
+	by order order2 sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+*merge to get pvalue and stat;
+data final;
+	merge all pdemog;
+	by order;
+	length col5 col6 $200;
+	if first.order and pvalue>=0.0001 then col6=strip(put(pvalue, 20.4));
+	if first.order and .<pvalue<0.0001 then col6='<0.0001';
+	if first.order and pvalue=. then col6='--';
+	if first.order and statistics ne . then col5=strip(put(statistics, 20.4));
+	if first.order and statistics=. then col5='--';
+	col5=repeat(' ',4-lengthn(scan(col5,1,'.')))||strip(col5);
+	col6=repeat(' ',4-lengthn(scan(col6,1,'.')))||strip(col6);
+
+	if upcase(_name_)='CP' then do;
+		col2="^R'\qj\tqdec\tx900 '"||strip(col2);
+		col3="^R'\qj\tqdec\tx900 '"||strip(col3);
+		col4="^R'\qj\tqdec\tx900 '"||strip(col4);
+	end;
+run;
+
+proc sort data=final;
+	by order order2 sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n SMKN SMKNN DRKN DRKNN LACTN PREGN;
+run;
+
+*save dataset for qc;
+data table.&outname.;
+	set final;
+	col2=compress(tranwrd(col2,"^R'\qj\tqdec\tx900 '",''));
+	col3=compress(tranwrd(col3,"^R'\qj\tqdec\tx900 '",''));
+	col4=compress(tranwrd(col4,"^R'\qj\tqdec\tx900 '",''));
+	col5=compress(col5);
+	col6=compress(col6);
+	keep col:;
+run;
+
+/*proc compare data= table.&outname. comp=tableqc.qc_&outname.;*/
+/*run;*/
+
+ods listing close;
+ods rtf file="&pathtab\&outname..rtf" style=rptstyle;
+ods escapechar="^";
+
+%mc_gtbtf(titledset=derived.ddtitles,name=&outname.);
+
+%mc_addpn(data=final,by=order order2 sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n
+SMKN SMKNN DRKN DRKNN LACTN PREGN, line=, pageno=%str(line+1; if first.order and line>20 then line=1; if line=1 then page+1;));
+
+proc report data=final nowindows missing split="#" headline;
+	column page pagetxt order order2 sexn racen mhterm1n mhterm2n mhterm3n mhterm4n mhterm5n mhterm6n mhterm7n
+	SMKN SMKNN DRKN DRKNN LACTN PREGN col1 col2 col3 col4 col5 col6;
+
+	define page			/order order=internal noprint;
+	define pagetxt 		/order=internal noprint;
+	define order		/order order=internal noprint;
+	define order2		/order order=internal noprint;
+	define sexn			/order order=internal noprint;
+	define racen		/order order=internal noprint;
+	define mhterm1n		/order order=internal noprint;
+	define mhterm2n		/order order=internal noprint;
+	define mhterm3n		/order order=internal noprint;
+	define mhterm4n		/order order=internal noprint;
+	define mhterm5n		/order order=internal noprint;
+	define mhterm6n		/order order=internal noprint;
+	define mhterm7n		/order order=internal noprint;
+	define SMKN			/order order=internal noprint;
+	define SMKNN		/order order=internal noprint;
+	define DRKN			/order order=internal noprint;
+	define DRKNN		/order order=internal noprint;
+	define LACTN		/order order=internal noprint;
+	define PREGN		/order order=internal noprint;
+
+	define col1			/display ""
+						 style(column)={just=l cellwidth=23%}
+						 style(header)={just=l};
+	define col2			/display "受试制剂-参比制剂#(N=%sysfunc(compress(&pop1)))"
+						 style(column)={just=c vjust=b asis=on cellwidth=15%}
+						 style(header)={just=c};
+	define col3			/display "参比制剂-受试制剂#(N=%sysfunc(compress(&pop2)))"
+						 style(column)={just=c vjust=b asis=on cellwidth=15%}
+						 style(header)={just=c};
+	define col4			/display "合计#(N=%sysfunc(compress(&pop3)))"
+						 style(column)={just=c vjust=b asis=on cellwidth=15%}
+						 style(header)={just=c};
+	define col5			/display "统计量^{super 1}"
+						 style(column)={just=l vjust=t asis=on cellwidth=15%
+						 pretext="^R'\li400 '"}
+						 style(header)={just=c};
+	define col6			/display "P值^{super 1}"
+						 style(column)={just=l vjust=t asis=on cellwidth=15%
+						 pretext="^R'\li400 '"}
+						 style(header)={just=c};
+
+	compute before page;
+	line "";
+	endcomp;
+
+	compute after order;
+	line "";
+	endcomp;
+
+	break after page/page;
+
+	%mc_adtf(adftxt=%str(pagetxt $150.), blank=none);
+
+run;
+
+ods rtf close;
+ods listing;
+
+%mend;
+%trt(TRTGRPN=1, outname=t_14_1_2I_demog);
+%trt(TRTGRPN=2, outname=t_14_1_2II_demog);
+
+*clean out work datasets;
+%mc_clrup;
+
+%put >>>Program run by $SYSUSERID ON &sysdate9 at &systime <<<;
+
+proc printto;
+run;
