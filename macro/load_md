@@ -1,0 +1,264 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: Load_md.sas,v $
+REV/REV        : $Revision: 1.1 $
+REV DATE       : $Date: 2019/02/01 02:04:27 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :N/A
+PURPOSE        :Load MD info from excel spreadsheet into a SAS dataset
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro load_md(lib      = derived,
+               ds       = adms,
+               wbook    = \\&server.\&client.\&project.\data\import\&project. Database Metadata Documentation.xls ,
+               dsnprefx = AD,
+               keepVars = Y,   /* Create global macro variable keep lists of all vars in a domain           */
+               namelen  = 8,
+               labellen = 40,
+               cleanup  = YES);
+   %if &lib eq ? %then 
+      %do;
+         ** Put out description here;
+         %put;
+         %put;
+         %put ***********************************************************************************************;
+         %put ***********************************************************************************************;
+         %put This load_md macro extracts the attributes from the derived data dictionary from parameter;
+         %put wbook and loads them into a SAS dataset named DDT and is stored in the parameter lib directory;
+         %put PARAMETERS:;
+         %put LIB=Derived or SDTM - libname where ADAM or SDTM data sets are stored permanently. ;
+         %put     When LIB=? then these instructions are displayed.;
+         %put DS=output dataset name ADMS for ADAM datasets or TDMS for SDTM datasets ;
+         %put WBOOK - fully specified path, filename, and extension of the derived data definition spreadsheet.;
+         %put DSNPREFX - Prefix that is always the same beginning characters for dataset names;
+         %put          - default=(AD), leave blank when creating SDTM;
+         %put NAMELEN - maximum length for variable names, defaults to 8;
+         %put LABELLEN - maximum length for variable labels, defaults to 40;
+         %put if length of a variable name or label exceeds the values for these parameters,;
+         %put         an AP PROB LEM statement is written to the log;
+         %put CLEANUP - Flag indicating if all datasets created during the call of LOAD_MD shall be deleted;
+         %put           (DEFAULT: YES);
+         %put *********************************************************************************************************;
+         %put *********************************************************************************************************;
+         %put;
+         %put;
+         %goto exit;
+      %end;
+
+   /* set scope for internal macro variables */
+   %local spsheet dsname n_out __i validvarname ;
+  
+   /* set option VALIDVARNAME to avioid conflicts when reading in the MD workbook */
+   %let validvarname = %sysfunc( getoption( validvarname )) ;
+   option validvarname = any ;
+  
+   %if %sysfunc( exist( work.ddt )) %then 
+      %do ;
+         proc datasets nolist lib = work;
+            delete ddt;
+         quit;
+      %end ;
+   %if %sysfunc( exist( work.ddtx )) %then 
+      %do ;
+         proc datasets nolist lib = work;
+            delete ddtx;
+            quit;
+      %end ;
+ 
+   /* Read in the spreadsheets that contain dataset definitions */
+   libname DDTWB EXCEL "&WBOOK" mixed=yes dbmax_text=32767 header=no;
+
+   /* Dataset sheets contains names of all worksheets that contain dataset descriptions */
+   proc sql noprint ;
+      create table sheets as
+      select memname, compress( memname , '$ ') as dsname
+        from dictionary.tables
+         where upcase( libname ) = "DDTWB"
+         and dbms_memtype = "TABLE"
+         and index(memname,'Print_Area') lt 1
+         %if %upcase(&ds)=ADMS %then 
+            %do;
+               and memname like "&dsnprefx.%$" ;
+            %end;
+         %if %upcase(&ds)=TDMS %then 
+            %do;
+               and  ((length(compress(memname))=3 and index(memname,'$') ) 
+               or index(upcase(memname),'SUPP'));
+            %end;
+   quit ;
+  
+   /* count the number of spreadsheets */
+   data _null_ ;
+      set sheets nobs = _nobs  ;
+      if _N_ = 1 then call symput( 'n_out' , compress( put( _nobs , best. ))) ;
+      stop ;
+   run ;
+    
+   /* download information from the selected spreadsheets and append it to dataset WORK.DDT */    
+   %do __i = 1 %to &n_out;
+  
+      /* retrieve the name for the spreadsheet to be downloaded */
+      data _null_ ;
+         set sheets (firstobs=&__i obs=&__i );
+         call symput('spsheet' , compress( memname )) ;
+         call symput('dsname' , compress( dsname ) ) ;
+      run ;        
+
+      /* download the contents of spreadsheet &SPSHEET */
+      data DDTX ;
+         length memname $ 8 outds_pk 8 ; retain memname "&dsname." outds_pk &__i ;
+         set ddtwb."&spsheet."n (DBSASTYPE = (F1='CHAR(200)'  F2='CHAR(100)' F3='CHAR(20)'
+                                         F4='NUMERIC(8)' F5='CHAR(90)'  F6='CHAR(4000)'
+                                         F7='CHAR(1000)' F8='CHAR(1000)' F9='CHAR(200)' 
+                                         F10='CHAR(80)' F11='CHAR(4000)'));
+         f1 = left( f1 ) ;
+         f3 = left( f3 ) ;
+      run ;                                
+
+      data DDTX (keep=memname outds_pk itmname itmlab itmtype itmlen itmform itmcode itmrule);
+         retain memname outds_pk ;
+         set ddtx (firstobs=9) ;
+         if f1 ne '' and memname ne '' and not(upcase(f1)='VARIABLE' and upcase(f2)='LABEL');
+      
+         ** recode character types to CHAR and NUM;
+              if upcase(f3) in ('TEXT', 'CHAR','DATE' ,'TIME', 'DATETIME' ) then f3='CHAR';
+         else if upcase(f3) in ('INTEGER' 'FLOAT' /*'DATE' 'TIME' 'DATETIME' */'BOOLEAN' 'NUM') then f3='NUM';
+         else 
+            do;
+               put 'AP PROB' 'LEM: Unrecognized ADAM variable type in DDT for this variable: ' memname '.' f1 ' type=' f3;
+               put 'AP PROB' 'LEM: Update type for ' memname '.' f1  ' to TEXT INTEGER FLOAT DATE TIME DATETIME or BOOLEAN';
+            end;  
+      
+         /* add length where no length is specified */
+              if upcase( f3 ) = 'NUM' and missing( f4 ) then f4 = 8 ;
+         else if upcase( f3 ) = 'CHAR' and missing( f4 ) then 
+            do ;
+               put 'AP PROB' 'LEM: No length assigned in DDT for this character variable: ' f1;
+               if n( input( compress( upcase( f5 ) , ' $NCHAR.)(' ) , ?? best. )) then
+                  do;
+                     f4 = input( compress( upcase( f5 ) , ' $NCHAR.)(' ) , best. );
+                  end;
+               else f4 = . ;
+            end ;
+    
+         rename f1  = itmname
+                f2  = itmlab
+                f3  = itmtype
+                f4  = itmlen
+                f5  = itmform
+                f6  = itmcode
+                f11 = itmrule
+                    ;
+         label memname  = "Member Name"
+               outds_pk = 'Member Number (artificial)'
+               F1       = "Variable Name"
+               F2       = "Variable Label"
+               F3       = "Variable Type (NUM/CHAR)"
+               F4       = "Variable Length"
+               F5       = "Variable Format"
+               F6       = "Controlled Terms"
+               F11      = "Derivation Rule Applied"
+               ;
+      run ;
+    
+      ** set together specification information from each dataset in the DDT; 
+      data ddt;
+         set %if &__i ne 1 %then 
+                %do; 
+                   ddt 
+                %end; 
+             ddtx (in=a );
+                
+         **  check length of variable name and label ;    
+         if a and length( compress( itmname )) > &namelen then put "AP PROB" "LEM: Check variable name in DDT - length > &namelen " itmname= ;
+         if a and length( compress( itmlab )) > &labellen then put "AP PROB" "LEM: Check variable label in DDT - length > &labellen " itmname= itmlab= ;
+      run;
+      
+   %end;  
+
+   
+   /* store the DDT dataset in the assigned library */
+   data &lib..&ds;
+      keep memname itmname itmlab outds_pk itmtype itmlen itmform itmcode itmrule;
+      set ddt;
+      where compress( itmname ) ne ' ' ;
+   run;
+
+   %if %upcase(%substr(&keepvars, 1, 1)) = Y %then 
+      %do;
+         %put INFO: &sysmacroname Creating Macro Vars KEEP<domain>;
+         %local domains i domain;
+         %let _domains =;
+         proc sql noprint;
+            select distinct memname into :domains
+            separated by ' '
+            from &lib..&ds;
+         quit;
+
+         %let domains = %upcase(&domains);
+         %*put INFO: domains = &domains;
+
+         %let i = 1;
+         %let domain = %scan(&domains, &i, ' ');
+         %do %while(%length(&domain) gt 0);
+
+            %global keep&domain;
+            %let keep&domain = ;
+            data keep&ds;
+               set &lib..&ds;
+               where upcase(memname) = "&domain";
+               nameN + 1;
+            run;
+               
+            proc sql noprint;
+               create table _v_&domain as
+               select distinct itmname, namen
+               from keep&ds
+               order by nameN;
+               ;
+
+               select itmname into :keep&domain
+               separated by ' '
+               from _v_&domain;
+            quit;
+
+            proc datasets nolist nodetails lib = work;
+               delete keep&ds _v_&domain / mt = data;
+            quit;
+            
+            %put INFO: Keep&domain = &&keep&domain;
+
+            %let i = %eval(&i + 1);
+            %let domain = %scan(&domains, &i, ' ');
+         %end;
+      %end;
+
+   *** clean up *** ;
+   /*** deassign library ***/  
+   libname ddtwb clear ;
+   /*** reset option VALIDVARNAME ***/
+   option validvarname = &validvarname ;
+   %if %upcase( &cleanup ) = YES %then 
+      %do ;
+         proc datasets nolist nodetails lib=work ; 
+            delete ddt ddtx sheets /mt=data ; 
+         quit ;
+      %end ;
+
+   %exit:;
+%mend load_md;
+
+**example call for ADAM dataset**;
+%*load_md(lib=derived,ds=adms,
+               wbook=\\&server.\&client.\&project.\data\import\&project.ADMS.xls,
+               dsnprefx=AD);
+
+**example call for SDTM dataset**;
+%*load_md(lib=sdtm,ds=tdms,
+               wbook=\\&server.\&client.\&project.\data\import\&project.TDMS.xls ,
+               dsnprefx=);
