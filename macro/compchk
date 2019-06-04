@@ -1,0 +1,646 @@
+/******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - - 
+PROGRAM NAME    : $RCSfile: _compchk.sas,v $
+REV/REV AUTH    : $Revision: 1.1 $ 
+REV DATE        : $Date: 2019/02/01 02:04:27 $  UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - - 
+PURPOSE         : Provides an overview of comparison findings
+INPUT FILES     : single compare file or folder with multiple compare files 
+OUTPUT FILES    : single file with results (default: CompCheck_<date>_<time>.lst)
+MACROS USED     : %getdirlist, %obscnt
+NOTES           : Parameters are as follows:
+                : cmploc  = Location of compare file(s)
+                : cmpfile = Name of the compare file to be checked.
+                :           If left empty, all files at &cmploc will be checked
+                :            (based on &cmpfiletype value).
+                : cmpfiletype = File type extension of compare files, will only 
+                :               be used when &cmpfile is empty.
+                :               Defaults to lst if not set by caller
+                : cmpfilewhere = Where statement applied in case cmpfile is empty
+                :                to allow the user to only filter for specific
+                :                files at the cmploc location.
+                :              example syntax: %str(kindex(FILENM,"<value">))
+                : outloc  = Location where resulting file is to be output.
+                :           Defaults to &cmploc if not set by caller.
+                : outfile = Name of output file.
+                :           Defaults to CompCheck_<date>_<time>.lst if not set.
+                : verbose = Defines what is displayed in output file as follows:
+                :             0 = Only Overall Assessments
+                :             1 = Overall Assessments and found issues
+                :             2 = Overall, found issues, and notes
+                :             3 = All messages from all checks
+                :           Defaults to 2 if not set by caller.
+                : 
+                : 
+                : 
+                : Created by: Michael Reich, Version: 0.9h
+Copyright PRA International. All Rights Reserved.
+******************************************************************************/
+
+%macro _CompChk (cmploc=,
+                cmpfile=,
+            cmpfiletype=lst,
+           cmpfilewhere=%str(1=1),
+                 outloc=EMPTY, /* will be translated to cmploc below as default */
+                outfile=EMPTY, /* will be translated to CompCheck_<date>_<time>.lst below as default */
+                verbose=2);
+
+%let origls = %sysfunc(getoption(linesize));
+%let origcent = %sysfunc(getoption(center));
+options linesize=MAX nocenter;
+
+*** Only start if we actually have a compare file location passed to us;
+%if %nrbquote(&cmploc) ne  %then %do;
+
+  ** Setting default values for outloc and outfile, if left as EMPTY;
+  * if no out location was given, set to compare location;
+  %if %nrbquote(&outloc)=EMPTY %then %do;
+    %let outloc = &cmploc;
+  %end;
+
+  * If no outfile name was given, set to CompCheck_<date>_<time>.lst;
+  %if %nrbquote(&outfile)=EMPTY %then %do;
+    data _null_;
+      call symput('curDTM',kcompress(tranwrd(tranwrd(put(date(),YYMMDD10.)||'_'||put(time(), tod.),'-',''),':','')));
+    run;
+    %let outfile = %str(CompCheck_&curDTM..lst);
+  %end;
+
+  ********************************************************************;
+  ********************************************************************;
+  ** PREPARATIONS;
+  ********************************************************************;
+  ********************************************************************;
+  * Reading in from compare file(s);
+  %macro readincmp(file=,dsnam=,num=);
+    data &dsnam&num (where=(LineIn ne ''));
+      length filenam $40 LineIn $500;
+      infile "&cmploc\&file" missover dsd lrecl=32767 dlm='@';
+
+      input LineIn $;
+      filenam = "&file";
+    run;
+  %mend readincmp;
+
+  %if %nrbquote(&cmpfile)= %then %do;
+    * If no compare file name was given, read-in all *.lst files in given location;
+    %getDirList(rootfld=,       
+                rootpth=&cmploc, 
+                  outds=_dirlist,   
+                   type=F,          
+                 filter=%if &cmpfiletype ne %then %do;
+                          %str(kindex(FILENM,".&cmpfiletype") and &cmpfilewhere)
+                        %end;
+                        %else %do;
+                          %str(&cmpfilewhere)
+                        %end;
+    );
+
+    * Reading in all files;
+    data _null_;
+      set _dirlist;
+      call execute('%readincmp(file='||kstrip(filenm)||',dsnam=_tmpbase,num='||kstrip(put(_n_,best.))||');');
+    run;
+
+    * Setting them all together;
+    data _null_;
+      set _dirlist end =eof;
+      if _n_=1 then call execute('data base1; length filenam $40 LineIn $500; set ');
+      call execute(' _tmpbase'||kstrip(put(_n_,best.)));
+      if eof then call execute('; run;');
+    run;
+  %end;
+  %else %do;
+    * If a file was given, just read in that file;
+    %readincmp(file=&cmpfile,dsnam=base1);
+  %end;
+
+  * Check if we have at least one observation read in;
+  %if %obscnt(base1) %then %do;
+    ********************************************************************;
+    ********************************************************************;
+    ** CHECKS;
+    ********************************************************************;
+    ********************************************************************;
+    * First batch of checks;
+    data pre;* (keep=filenam curcomp compno TESTCD RESULT RESULTDESC);
+      set base1;
+      length TESTCD $10 RESULT $10 RESULTDESC $500 curcomp $200
+             contyptxt valdiffvars $200 maincount qccount $50;
+      retain curcomp compno mainds qcds /* Header like retain variables for current compare */
+             nobsvarfl countstart countstop maincount qccount novarsfl /* For Num Obs/Vars */ 
+             contypfl contyptxt contypstart /* For Conflicting Types */
+             valdiffl valdiftypstart valdiffvars /* For Value differences */
+             varpremfl varpremtxt varpreqfl varpreqtxt varprecurtbl varpretypstart /* For Variable Presence differences */;
+
+
+      ** Getting info on which item we are currently looking at;
+      if kindex(LineIn,"Comparison of") then do;
+        _indof = kindex(LineIn," of ")+4; _indwith = kindex(LineIn," with ");
+        mainds = kstrip(ksubstr(LineIn,_indof,_indwith-_indof));
+        qcds   = kstrip(ksubstr(LineIn,_indwith+5));
+        curcomp = "Comparison of "||kstrip(mainds)||" [Main] with "||kstrip(qcds)||" [QC]";
+        novarsfl = 'N'; * Resetting no variables flag;
+      end;
+      if kindex(LineIn,"Data Set Summary") then compno+1;
+
+      ********************************************************************;
+      ** Variable and Observations counts;
+      ** Empty datasets in comparison;
+      ********************************************************************;
+      * If the current line contains NVar and Nobs;
+      if kindex(LineIn," NVar") and kindex(LineIn," NObs") then do;
+        * Obtain kindex of where these items start and stop;
+        nobsvarfl = 'Y'; countstart = kindex(LineIn," NVar"); countstop = (kindex(LineIn," NObs")+5)-countstart;
+      end;
+      else if nobsvarfl='Y' then do;
+        * Check if the current line has the main or QC dataset and populate the corresponding count variable;
+        if kindex(LineIn,kstrip(mainds)) then maincount = ksubstr(LineIn,countstart,countstop);
+        if kindex(LineIn,kstrip(qcds)) then qccount = ksubstr(LineIn,countstart,countstop);
+        * After both lines were read in create results;
+        if maincount ne '' and qccount ne '' then do;
+          * Check if one of the two datasets has no variables at all for clean handling of abridge compare file;
+          if index(compress(maincount),"0")=1 or index(compress(qccount),"0")=1 then novarsfl='Y';
+
+          * Check for variable/obs numbers;
+          TESTCD = "NUMVAROBS";
+          if maincount ne qccount then do;
+            RESULT = 'CHECK';
+            RESULTDESC = 'Different number of variables/observations#Main: '||kstrip(maincount)||'#QC  : '||kstrip(qccount);
+          end;
+          else do;
+            RESULT = 'OKAY';
+            RESULTDESC = '';
+          end;
+          output;
+
+          * Also, check if one or both datasets are empty;
+          if kindex(maincount," 0") and kindex(qccount," 0") then do;
+            TESTCD = "EMPTYDS";
+            RESULT = 'CHECK';
+            RESULTDESC = 'Both Main and QC have 0 variables/observations';
+            output;
+            TESTCD = "OVERALL";
+            RESULT = 'CHECK';
+            RESULTDESC = 'No comparison was done as both Main and QC are empty';
+            output;
+          end;
+          else if kindex(maincount," 0") then do;
+            TESTCD = "EMPTYDS";
+            RESULT = 'CHECK';
+            RESULTDESC = 'Main has 0 variables/observations, while QC is non-empty';
+            output;
+          end;
+          else if kindex(qccount," 0") then do;
+            TESTCD = "EMPTYDS";
+            RESULT = 'CHECK';
+            RESULTDESC = 'QC has 0 variables/observations, while Main is non-empty';
+            output;
+          end;
+
+          * Resetting variables for the next compare;
+          maincount=''; qccount=''; nobsvarfl='N';
+        end;
+      end;
+
+      * Only do any further checks for the current compare if both datasets have at least 
+        1 variable each - the compare file looks vastly different otherwise and it makes no
+        sense to parse it further as long as this is not covered/checked;
+      if novarsfl = 'N' then do;
+          ********************************************************************;
+          ** Variables in one but not the other;
+          ********************************************************************;
+          if kindex(LineIn,"Number of Var") and kindex(LineIn,"but not in") then do;
+            if kindex(LineIn,kstrip(mainds)) < kindex(LineIn,kstrip(qcds)) then do;
+              varpremfl = 'Y';
+              numchar = klength(LineIn)-kindex(LineIn,":");
+              varpremtxt = "Number of variables"||kstrip(ksubstr(LineIn,kindex(LineIn,":"),numchar));
+            end;
+            else if kindex(LineIn,kstrip(qcds)) < kindex(LineIn,kstrip(mainds)) then do;
+              varpreqfl = 'Y';
+              numchar = klength(LineIn)-kindex(LineIn,":");
+              varpreqtxt = "Number of variables"||kstrip(ksubstr(LineIn,kindex(LineIn,":"),numchar));
+            end;
+          end;
+          * Else if we do have variable presence issues and we are past the "Number of" items;
+          else if (varpremfl='Y' or varpreqfl='Y') and kindex(LineIn,"Number of") = 0 then do;
+            * If table with variables in one but not the other starts;
+            if kindex(LineIn,"Listing of Variables in") and kindex(LineIn,"but not in") then do;
+              * Find out if it is the main or QC table;
+              if kindex(LineIn,kstrip(mainds)) < kindex(LineIn,kstrip(qcds)) then varprecurtbl = 'M';
+              else if kindex(LineIn,kstrip(qcds)) < kindex(LineIn,kstrip(mainds)) then varprecurtbl = 'Q';
+            end;
+            * Else if we have a variable presence table starting and are in the header row;
+            else if varprecurtbl ne '' and kindex(LineIn,"Type") and kindex(LineIn,"Length") then do;
+              * Obtain where column variable type is located;
+              varpretypstart = kindex(LineIn,"Type ");
+            end;
+            * Else if any other table or the Observation Summary starts;
+            else if kindex(LineIn,"Observation Summary") or kindex(LineIn,"Listing") then do;
+              * If variables in main missing in QC, output item;
+              if varpremfl='Y' then do;
+                TESTCD='VARPREM';
+                RESULT='CHECK';
+                RESULTDESC = kstrip(varpremtxt);
+                output;
+                * Resetting variables for the next compare;
+                varpremfl='N'; varpremtxt="";
+              end;
+              * If variables in QC missing in Main, output item;
+              if varpreqfl='Y' then do;
+                TESTCD='VARPREQ';
+                RESULT='CHECK';
+                RESULTDESC = kstrip(varpreqtxt);
+                output;
+                * Resetting variables for the next compare;
+                varpreqfl='N'; varpreqtxt="";
+              end;
+              * Reset the flag indicating that we are looking at presence tables;
+              varprecurtbl = '';
+            end;
+            * Else obtain table contents;
+            else if ksubstr(LineIn,varpretypstart,4) in ("Char","Num ") then do;
+              * Add to main if current table is for main;
+              if varprecurtbl = 'M' then do;
+                if kindex(varpremtxt,"as follows:#") = 0 then
+                  varpremtxt = kstrip(varpremtxt)||", as follows:#"||kstrip(ksubstr(LineIn,1,kindex(LineIn," ")));
+                else varpremtxt = kstrip(varpremtxt)||", "||kstrip(ksubstr(LineIn,1,kindex(LineIn," ")));
+              end;
+              * Add to QC if current table is for QC;
+              if varprecurtbl = 'Q' then do;
+                if kindex(varpreqtxt,"as follows:#") = 0 then
+                  varpreqtxt = kstrip(varpreqtxt)||", as follows:#"||kstrip(ksubstr(LineIn,1,kindex(LineIn," ")));
+                else varpreqtxt = kstrip(varpreqtxt)||", "||kstrip(ksubstr(LineIn,1,kindex(LineIn," ")));
+              end;
+            end;
+          end;
+
+
+          ********************************************************************;
+          ** Duplicates;
+          ********************************************************************;
+          if kindex(LineIn,"contains a duplicate") then do;
+            TESTCD = "DUPLICATES";
+            RESULT = 'CHECK';
+            RESULTDESC = compbl(ksubstr(LineIn,23,kindex(LineIn,'contains a')-23)
+                                ||" contains a duplicate observation");
+            output;
+          end;
+
+          ********************************************************************;
+          ** Variables with conflicting types;
+          ********************************************************************;
+          * Initialize variables when conflicting types item are present;
+          if kindex(LineIn,"Number of Variables with Conflicting") then do;
+            contypfl='Y'; 
+            numchar = kindex(LineIn,".")-kindex(LineIn,":");
+            contyptxt = "Number of affected variables"||kstrip(ksubstr(LineIn,kindex(LineIn,":"),numchar))||", as follows:";
+          end;
+          else if contypfl='Y' then do;
+            * If Attribute diffs or Observation summary starts, output conflicting types item;
+            if (kindex(LineIn,"Listing") and kindex(LineIn,"Differing Attributes")) or kindex(LineIn,"Observation Summary") then do;
+              TESTCD='TYPEDIFF';
+              RESULT='CHECK';
+              RESULTDESC = kstrip(contyptxt);
+              output;
+              * Resetting variables for the next compare;
+              contypfl='N'; contyptxt="";
+            end;
+            * Else if the first row of conflicting types table starts, get start position of variable type;
+            else if kindex(LineIn," Type") and kindex(LineIn," Length") then do;
+              contypstart=kindex(LineIn,"Type");
+            end;
+            * Else if we have a row of the conflicting types table...;
+            else if (kindex(LineIn," Char") or kindex(LineIn," Num")) and klength(LineIn)>contypstart then do;
+              if ksubstr(LineIn,contypstart,4) in ("Char","Num ") then do;
+                * add "#<varname> (<maintype> [Main]" to result text;
+                _maintype = ksubstr(LineIn,contypstart,4);
+                if _maintype="Char" then _qctype="Num ";
+                                    else _qctype="Char";
+                _tmptxt="#"||kstrip(ksubstr(LineIn,1,kindex(LineIn," ")))||" ("||kstrip(_maintype)||" [Main]";
+                _tmptxt=kstrip(_tmptxt)||" vs. "||kstrip(_qctype)||" [QC])";
+                contyptxt=kstrip(contyptxt)||kstrip(_tmptxt);
+              end;
+            end;
+          end;
+
+          ********************************************************************;
+          ** Variables with conflicting attributes;
+          ********************************************************************;
+          if kindex(LineIn,"Number of Variables with Differing") then do;
+            TESTCD='ATTRDIFF';
+            RESULT='NOTE';
+            RESULTDESC = "Number of affected variables"||kstrip(ksubstr(LineIn,kindex(LineIn,":")));
+            output;
+          end;
+
+          ********************************************************************;
+          ** Observations in one but not the other;
+          ********************************************************************;
+          if kindex(LineIn,"Number of Observations") and kindex(LineIn,"but not in") then do;
+            RESULTDESC = "Number of observations"||kstrip(ksubstr(LineIn,kindex(LineIn,":")));
+            RESULT = 'CHECK';
+            if kindex(LineIn,kstrip(mainds))<kindex(LineIn,kstrip(qcds)) then TESTCD='OBSDIFFM';
+            else TESTCD='OBSDIFFQ';
+            output;   
+          end;
+
+          ********************************************************************;
+          ** Differences in variables;
+          ********************************************************************;
+          * If the current line contains NDif and MaxDif;
+          if kindex(LineIn," Ndif") and (kindex(LineIn," MaxDif") 
+                                        or (kindex(LineIn," MaxCrit"))) then do;
+            valdiffl = 'Y'; valdiftypstart = kindex(LineIn,"Type")-1;
+          end;
+          * For each following record;
+          else if valdiffl = 'Y' then do;
+            * If actual difference tables start, output results;
+            if kindex(LineIn,"Value Comparison Results for Variables") then do;
+              TESTCD = 'VALDIFF'; 
+              RESULT = 'CHECK';
+              RESULTDESC = 'Differences in the following variables:#'||valdiffvars;
+              output;
+              * Resetting variables for the next compare;
+              valdiffl = 'N'; valdiffvars="";
+            end;
+            * Else, if the current line belongs to the value difference variable table, add variable to 
+              result text;
+            else if kindex(LineIn," CHAR ") or kindex(LineIn," NUM ") then do;
+              if valdiffvars="" then valdiffvars=kstrip(ksubstr(LineIn,1,valdiftypstart));
+              else valdiffvars=kstrip(valdiffvars)||", "||kstrip(ksubstr(LineIn,1,valdiftypstart));
+            end;
+          end;
+
+          ********************************************************************;
+          ** Was criterion used in compare?;
+          ********************************************************************;
+          if kindex(LineIn,"Maximum Difference Criterion") then do;
+            TESTCD = 'CRITERION'; 
+            RESULT = 'NOTE';
+            RESULTDESC = 'Used criterion'||kstrip(ksubstr(LineIn,kindex(LineIn,":")));
+            output;
+          end;
+
+          ********************************************************************;
+          ** Final assessment;
+          ********************************************************************;
+          if kindex(LineIn,"All values compared are exactly equal.") then do;
+            TESTCD = "OVERALL";
+            RESULT = 'OKAY';
+            RESULTDESC = '';
+            output;
+          end;
+      end;
+    run;
+
+    * Creation of some flags to produce the Overall assessment further below;
+    proc sql;
+      * Were there any findings?;
+      create table _finding as
+        select distinct filenam, compno, curcomp, 'OVERALL' as TESTCD length = 10, 'Y' as finding
+          from pre
+         where RESULT = 'CHECK'
+      order by filenam, compno, curcomp;
+      * Was a criterion used?;
+      create table _criterion as
+        select distinct filenam, compno, curcomp, 'OVERALL' as TESTCD length = 10, 'Y' as criterion
+          from pre
+         where TESTCD='CRITERION'
+      order by filenam, compno, curcomp;
+    quit;
+    proc sort data=pre; by filenam compno curcomp TESTCD; run;
+    data pre2;
+      merge pre _finding _criterion;
+      by filenam compno curcomp TESTCD;
+    run;
+
+    ********************************************************************;
+    ********************************************************************;
+    ** PRETTY-MAKING;
+    ********************************************************************;
+    ********************************************************************;
+    * Create template;
+    proc sql;
+      create table _checked as
+        select distinct filenam, compno, curcomp from pre2;
+    quit;
+
+    data _template;
+      set _checked;
+      length TESTCD $10 TEST $200;
+      TESTCD = 'NUMVAROBS';
+      TEST   = '     Number of Variables and Observations';
+      sort1  = 1; noteonly='N';
+      output;
+      TESTCD = 'EMPTYDS';
+      TEST   = '     Empty dataset';
+      sort1  = 2; noteonly='N';
+      output;
+      TESTCD = 'VARPREM';
+      TEST   = '     Variables present in Main but not QC';
+      sort1  = 3; noteonly='N';
+      output;     
+      TESTCD = 'VARPREQ';
+      TEST   = '     Variables present in QC but not Main';
+      sort1  = 4; noteonly='N';
+      output;     
+      TESTCD = 'DUPLICATES';
+      TEST   = '     Duplicates as per used compare key';
+      sort1  = 5; noteonly='N';
+      output;      
+      TESTCD = 'TYPEDIFF';
+      TEST   = '     Differences in variable types';
+      sort1  = 6; noteonly='N';
+      output;
+      TESTCD = 'ATTRDIFF';
+      TEST   = '     Differences in variable attributes';
+      sort1  = 7; noteonly='N';
+      output;
+      TESTCD = 'OBSDIFFM';
+      TEST   = '     Observations in Main but not QC';
+      sort1  = 8; noteonly='N';
+      output;
+      TESTCD = 'OBSDIFFQ';
+      TEST   = '     Observations in QC but not in Main';
+      sort1  = 9; noteonly='N';
+      output;
+      TESTCD = 'VALDIFF';
+      TEST   = '     Differences in variable values';
+      sort1  = 10; noteonly='N';
+      output;
+      TESTCD = 'CRITERION';
+      TEST   = '     Criterion was used for this comparison';
+      sort1  = 98; noteonly='Y';
+      output;
+      TESTCD = 'OVERALL';
+      TEST   = '     Overall Comparison Assessment';
+      sort1  = 99; noteonly='N';
+      output;
+    run;
+    proc sort data=_template; by filenam compno curcomp TESTCD; run;
+
+    * Merge on template;
+    data prefinal;
+      merge _template pre2;
+      by filenam compno curcomp TESTCD;
+    run;
+
+    * Some final assignments/interpretatons of findings;
+    data prefinal (drop=finding);
+      set prefinal;
+      if TESTCD = 'OVERALL' then do;
+       if finding = 'Y' and result ne 'CHECK' then do;
+         RESULT = 'CHECK';
+         RESULTDESC = 'At least one issue was identified'; 
+         %if &verbose>0 %then %do; 
+           RESULTDESC=kstrip(RESULTDESC)||' as listed above.';
+         %end;
+       end;
+       else if criterion = 'Y' and result ne 'CHECK' then do;
+         RESULT = 'NOTE';
+         RESULTDESC = 'Comparison seems clean, but criterion was used.# - Check manually to make sure.'; 
+       end;
+
+       if RESULT = '' then do;
+         RESULT = 'CHECK';
+         RESULTDESC = 'No specific issue detected, but compare still not clean.';
+       end;
+      end;
+      else if RESULT = '' and noteonly = 'N' then do;
+        RESULT = 'OKAY';
+        RESULTDESC = '';
+      end;
+    run;
+
+    * Adding one new row for "comparison of" line;
+    proc sort data=prefinal; by filenam compno curcomp sort1; run;
+    data prefinal2;
+      set prefinal;
+      by filenam compno curcomp;
+      if first.compno then do;
+        output;
+        testcd = ''; result = ''; resultdesc = ''; sort1 = .;
+        test = kstrip(put(compno,best.))||". "||kstrip(curcomp); 
+      end;
+      output;
+    run;
+    proc sort data=prefinal2; by filenam compno curcomp sort1; run;
+
+    * Select which items end up in the output file depending on verbose level;
+    data final_sel;
+      set prefinal2;
+      %if &verbose = 0 %then %do;
+        * Verbose level 0 - Only overall;
+        where TESTCD in ('OVERALL',''); 
+      %end;
+      %if &verbose = 1 %then %do;
+        * Verbose level 1 - Overall and CHECK items;
+        where RESULT='CHECK' or TESTCD in ('OVERALL','');
+      %end;
+      %if &verbose = 2 %then %do;
+        * Verbose level 2 - Overall, CHECK , and NOTE items;
+        where RESULT in ('CHECK','NOTE') or TESTCD in ('OVERALL','');
+      %end;
+      %if &verbose = 3 %then %do;
+        * Verbose level 3 - All produced messages (except for note-only items that checked out okay);
+        where RESULT ne '' or TESTCD = '';
+      %end;  
+    run;
+
+    * Get page breaking;
+    proc sql noprint;
+      create table _itmcnt as
+        select distinct filenam, compno, curcomp, count(*) as _itmcnt
+          from final_sel
+      group by filenam, compno, curcomp;
+      create table _filecnt as
+        select distinct filenam, count(*) as __filecnt
+          from final_sel where TESTCD = 'OVERALL' group by filenam;
+      select max(compno) into :_maxcnt from final_sel;
+      %let _maxcnt = &_maxcnt;
+    quit;
+    data final_sel; merge final_sel _itmcnt; by filenam compno curcomp; run;
+    data final_sel; merge final_sel _filecnt; by filenam; run;
+
+    data final (drop=__filecnt);
+      set final_sel;
+      by filenam compno curcomp sort1;
+      retain line 0 page 0;
+      line+ 1;
+      if /*(first.compno and line + _itmcnt > 30) or */first.filenam then line=1;
+      if line=1 then page+1;
+      _filecnt = kstrip(put(__filecnt,best.));
+    run;
+
+    ********************************************************************;
+    ********************************************************************;
+    ** OUTPUT;
+    ********************************************************************;
+    ********************************************************************;
+    * Writing out results;
+    proc printto print="&outloc.\&outfile." new;
+    run;
+
+    title; footnote;
+    %let sepline = _________________________________________________________________;
+
+    proc report data = final nowindows missing split='#' ps=10000;
+        column page filenam compno curcomp sort1 _filecnt test result resultdesc ;
+        define page       / order order=internal noprint;
+        define filenam    / order order=internal noprint;    
+        define compno     / order order=internal noprint;    
+        define curcomp    / order order=internal noprint;    
+        define sort1      / order order=internal noprint;
+        define _filecnt   / noprint;
+        define test       / display "   Checked Compare Result#      Performed Check Item" width=70 flow;
+        define result     / display "Result" width=10 flow;
+        define resultdesc / display "Result Details" width=55 flow;
+
+        compute before compno;
+          line @1 "&sepline.&sepline.";
+        endcomp;
+
+        %if %nrbquote(&cmpfile)= %then %do;
+        compute after filenam;
+          line " ";
+          line "*****************************************************************************";
+          line "**************************    Next Compare File    **************************";
+          line "*****************************************************************************";
+          line " ";
+        endcomp;
+        %end;
+
+        break after page /page;
+
+        compute before _page_;
+          line " ";
+          line @1 "Path: &cmploc";
+          line @1 "File: " filenam $50.;
+          %if %nrbquote(&cmpfile)= %then %do;
+          line @1 "Total number of compares checked (this file): " _filecnt $10.;
+          line @1 "Total number of compares checked (all files): &_maxcnt";
+          %end;
+          %else %do;
+          line @1 "Total number of compares checked): " _filecnt $10.;
+          %end;
+          line @1 "Run on %sysfunc(date(),date9.) at %sysfunc(time(),tod8.) by %sysget(username)";
+          line @1 "------------------------------------------------------------------------------";
+        endcomp;
+    run;
+
+    proc printto; run;
+  %end;
+  %else %do;
+    * dataset with read-in file(s) is empty - abort processing;
+    %put %str(ER)ROR (_CompChk): No files were read in or read in file was empty. _CompChk aborted processing;
+  %end;
+%end;
+%else %do;
+  * No compare location was given - abort processing;
+  %put %str(ER)ROR (_CompChk): No compare file location given. _CompChk was not executed;
+%end;
+
+options linesize=&origls &origcent;
+
+%mend _CompChk;
