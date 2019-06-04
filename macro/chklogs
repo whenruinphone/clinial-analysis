@@ -1,0 +1,366 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: _chklogs.sas,v $
+REV/REV        : $Revision: 1.3 $
+REV DATE       : $Date: 2019/05/07 05:18:18 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :DYG/HDYGCNCD0422
+PURPOSE        :Check log Program
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL DERIVED DATASET QC LOGS **;
+*-----------------------------------------------------------------------------;
+%macro _chklogs(
+  inlib    =,        /* INLIB or INDIR - INLIB takes higher precedence default is current directory */
+  indir    =,        /* Libref of directory to process */
+  ext      =log,
+  outlib   =,
+  outdir   =,
+  outfile  =_chklogs,
+  outext   =log,
+  prefixes =a b c d e f g h i j k l m n o p q r s t u v w x y z,
+  qclevel  =3,
+  checklst =,
+  datestmp =Y,
+  debug    =N,
+  flagtext =&SYSMACRONAME INFO:);
+
+  * TEMPORARILY TURN OFF MACRO OPTIONS;
+  %local _source _source2 _mprint _mlogic _symbolgen _center _notes _stimer _ls;
+
+  %let _source    = %sysfunc(getoption(source));
+  %let _source2   = %sysfunc(getoption(source2));
+  %let _mprint    = %sysfunc(getoption(mprint));
+  %let _mlogic    = %sysfunc(getoption(mlogic));
+  %let _symbolgen = %sysfunc(getoption(symbolgen));
+  %let _center    = %sysfunc(getoption(center));
+  %let _notes     = %sysfunc(getoption(notes)); 
+  %let _stimer    = %sysfunc(getoption(stimer));
+  %let _LS        = %sysfunc(getoption(linesize));
+
+  %if %substr(%upcase(&debug), 1, 1) = N %then %do;
+    options nosource nosource2 nomprint nomlogic nosymbolgen nostimer linesize=200;
+  %end;
+  %else %do;
+    options source source2 mprint mlogic symbolgen;
+  %end;
+
+  * GENERATE MACRO VARIABLE INLIB OR INDIR, SO EITHER ONE CAN BE USED BELOW;
+  %if %length(&inlib) gt 0 %then %do;
+    %let inlib = %upcase(&inlib);
+    %let indir = %sysfunc(pathname(&inlib));
+  %end;
+  %else %if %length(&indir) gt 0 %then %do;
+    libname inlib "&indir";
+    %let inlib = %upcase(inlib);
+  %end;
+  %else %do;
+    %put &flagtext REQUIRED PARAMETER NEEDED:  INLIB or INDIR;
+    %goto endmac;
+  %end;
+  %put &flagtext INDIR = &indir;
+
+  * GENERATE MACRO VARIABLE OUTLIB OR OUTDIR, SO EITHER ONE CAN BE USED BELOW;
+  %if %length(&outlib) gt 0 %then %do;
+    %let outlib = %upcase(&outlib);
+    %let outdir = %sysfunc(pathname(&outlib));
+  %end;
+  %else %if %length(&outdir) gt 0 %then %do;
+    libname outlib "&outdir";
+    %let outlib = %upcase(outlib);
+  %end;
+  %else %do;
+    %let outdir = &indir;
+    %let outlib = &inlib;
+  %end;
+
+  %if %upcase(%substr(&datestmp, 1, 1)) = Y %then %do;
+    %macro datestmp;
+      %global g_datestmp;
+      data _null_;
+        call symput("g_datestmp", left(put("&sysdate9"d, IS8601DA.)));
+      run;
+      %let g_datestmp=%sysfunc(compress(&g_datestmp, "-"));
+    %mend;
+
+    %datestmp;
+    %let outfile = &outfile._&g_datestmp..&outext;
+  %end;
+  %else %let outfile = &outfile..&outext;
+
+  %if %length(&ext) gt 0 %then %let ext = %upcase(&ext);
+  %if %length(&checklst) gt 0 %then %let checklst = %upcase(&checklst);
+
+  * CREATE CSV LIST TO SELECT PROPER PREFIXES;
+  %if %length(&prefixes) gt 0 %then %let prefixes = %upcase(&prefixes);
+
+  %let preunit=%scan(&prefixes, 1, ' ');
+  %let csvprefx = &preunit;
+  %let k = 2;
+  %let preunit=%scan(&prefixes, &k, ' ');
+  %do %while(%length(&preunit) gt 0);
+    %let csvprefx = &csvprefx","&preunit;
+    %let k = %eval(&k + 1);
+    %let preunit=%scan(&prefixes, &k, ' ');
+  %end;
+
+  %if %sysfunc(fileexist(&indir)) %then %do;
+    * GET FILES FROM SPECIFIED DIRECTORY;
+    data _files(keep=filename root ext len);
+      length filename root $60 ext $10;
+      rc    = filename('_dir',"&indir");
+      dirid = dopen('_dir');
+      numitems = dnum(dirid);
+      do i=1 to numitems;
+        filename = dread(dirid, i);
+        len      = length(filename);
+        root     = scan(filename, 1, '.');
+        ext      = scan(filename, 2, '.');
+
+        * EXCLUDE FOLDERS;
+        if upcase(ext) in ("&ext")
+        %if %length(&prefixes) gt 0 %then %do;
+          and upcase(filename) in: ("&csvprefx")
+        %end;
+        and upcase(filename) ne upcase("&outfile") then output;
+      end;
+      rc    = dclose(dirid);
+      dirid = dclose(dirid);
+      rc    = filename('_dir',' ');
+    run;
+    proc print data=_files;
+    run;
+  %end;
+  %else %put &flagtext INVALID DIR NAME: &indir;
+
+  %if %sysfunc(exist(_files)) %then %do;
+    %let files =;
+    proc sql noprint;
+      select filename into :files
+       separated by ' '
+        from work._files;
+    quit;
+
+    %put &flagtext PROCESSING &files;
+    %put &flagtext CREATING  &outdir.\&outfile;
+
+    %let i = 1;
+    %let file = %scan(&files, &i, ' ');
+    %do %while(%length(&file) gt 0 );
+      filename log&i "&indir.\&file";
+
+      * INPUT DATA;
+      data logfile;
+        length file $100;
+        infile log&i missover pad lrecl=1000;
+
+        input @1 logline $200.;
+
+        file = "&file";
+      run;
+
+      data logfile(keep=file logline errcnt toterrs);
+        length logline $200;
+        set logfile end=eof;
+        length word $80 chklst1 chklst2 chklst3 $200 chklst $600;
+
+        retain chklst file;
+        chklst1 = "ERROR|WARNING|IS MISSING|MISSING VALUES|ASSUMING|CONVERTED|DIVISION|DUPLICATE|EMPTY|ENDSAS|EXIST|EXPAND| HANGING|IGNORED|INFO|INSUFFICIENT|INVALID|OBS=0|OUTSIDE|DELETING";
+        chklst2 = "MACRO)|OVERWRITTEN|PARENTHESES|PROBLEM|REMERGING|REPEAT|TOO SMALL|TRUNCATED|UNCLOSED|UNINITIALIZED|UNREFERENCED|COULD NOT|NOT FOUND|COMPILED FROM THE AUTOCALL|NOT BEEN COMPILED";
+        chklst3 = "&checklst";
+        chklst = trim(left(chklst1))||'|'||trim(left(chklst2))||'|'||trim(left(chklst3));
+
+        retain toterrs;
+        logline = upcase(logline);
+        errcnt  = 0;
+        if _n_  = 1 then toterrs = 0;
+
+        i = 1;
+        word = scan(chklst, i, '|');
+        do while(word ne '' and errcnt = 0);
+          if index(logline, scan(chklst, i, '|')) gt 0 then do;
+            errcnt = 1;
+            toterrs = toterrs + errcnt;
+            output;
+          end;
+          i = i + 1;
+          word = scan(chklst, i, '|');
+        end;
+      run;
+
+      %if &qclevel > 0 %then %do;
+      * EXCLUDE SELECT LINES;
+        data logfile;
+          set logfile end=eof;
+          retain qclevel &qclevel;
+          delete = 0;
+
+          if      index(logline, 'MPRINT')           gt 0 then delete=1;
+          else if index(logline, 'MACROGEN')         gt 0 then delete=1;
+          else if index(logline, 'MLOGIC')           gt 0 then delete=1;
+          else if index(logline, 'SYMBOLGEN')        gt 0 then delete=1;
+          else if index(logline, '/*')               gt 0 then delete=1;
+          else if index(logline, '*/')               gt 0 then delete=1;
+          else if index(logline, '"')                gt 0 then delete=1;
+          else if index(logline, "'")                gt 0 then delete=1;
+          else if index(logline, '%PUT')             gt 0 then delete=1;
+          else if index(logline, '%LET')             gt 0 then delete=1;
+          else if index(logline, 'PUT "')            gt 0 then delete=1;
+          else if index(logline, '%*')               gt 0 then delete=1;
+          else if index(logline, '*--')              gt 0 then delete=1;
+          else if index(logline, '%MACRO')           gt 0 then delete=1;
+          else if index(logline, '%INCLUDE')         gt 0 then delete=1;
+          else if index(logline, ' IF ')             gt 0 then delete=1;
+          else if index(logline, 'FEXIST')           gt 0 then delete=1;
+          else if index(logline, '*ENDSAS')          gt 0 then delete=1;
+          else if index(logline, '%SYSFUNC')         gt 0 then delete=1;
+          else if index(logline, 'ALREADY SORTED')   gt 0 then delete=1;
+          else if index(logline, 'BY  EDIT DESCRIPTION') gt 0 then delete=1;
+          else if index(logline, 'CHKD BY, DATE')    gt 0 then delete=1;
+          else if index(logline, 'ASSUMES:')         gt 0 then delete=1;
+          else if index(logline, 'APPEARS ON A DELETE')  gt 0 then delete=1;
+          else if index(logline, 'DELETING')         gt 0 then delete=1;
+
+          if qclevel > 1 then do;
+            * NOTES;
+            if      index(logline, 'DATA FILE IS BEING COPIED TO BASE FILE')         gt 0 then delete=1;
+            else if index(logline, 'SUMMARY STATISTICS BACK WITH THE ORIGINAL DATA') gt 0 then delete=1;
+          end;
+
+          if qclevel > 2 then do;
+            if index(logline, 'CATALOG IS OPENED FOR READ ONLY') gt 0 then delete=1;
+            else if index(logline, 'ALREADY ON THE LIBRARY')     gt 0 then delete=1;
+            else if index(logline, '_ERROR_=0')                  gt 0 then delete=1;
+            else if index(logline, 'MERGENOBY')                  gt 0 then delete=1;
+            else if index(logline, '_CONVERTED')                 gt 0 then delete=1;
+            else if ((index(logline, '\CONVERTED')               gt 0 or
+                      index(logline, 'CONVERTED\')              gt 0) and 
+                     (index(logline, 'INFO:')    EQ 0 and
+                      index(logline, 'PROBLEM:') EQ 0 and
+                      index(logline, 'WARNING:') EQ 0 and
+                      index(logline, 'ERROR:')   EQ 0))               then delete=1;
+            else if index(logline, 'SYSMACRONAME')               gt 0 then delete=1;
+            else if index(logline, 'INFORMAT')                   gt 0 then delete=1;
+            else if index(logline, 'INFORMED')                   gt 0 then delete=1;
+            else if index(logline, 'INFORMATION')                gt 0 then delete=1;
+            else if index(logline, 'INFOCONT')                   gt 0 then delete=1;
+            else if index(logline, 'SET INFO')                   gt 0 then delete=1;
+            else if index(logline, 'DATA INFO')                  gt 0 then delete=1;
+            else if index(logline, 'DATA=INFO')                  gt 0 then delete=1;
+            else if index(logline, 'DATA = INFO')                gt 0 then delete=1;
+            else if index(logline, 'INFO,')                      gt 0 then delete=1;
+            else if index(logline, 'INFO1')                      gt 0 then delete=1;
+            else if index(logline, 'INFO2')                      gt 0 then delete=1;
+            else if index(logline, 'INFO3')                      gt 0 then delete=1;
+            else if index(logline, 'INFO4')                      gt 0 then delete=1;
+            else if index(logline, 'INFO5')                      gt 0 then delete=1;
+            else if index(logline, 'INFODT')                     gt 0 then delete=1;
+            else if (index(logline, 'INFO') and
+                     index(logline, ' INFO') EQ 0)                    then delete=1;
+/*            else if index(logline, 'MISSING VALUES')             gt 0 then delete=1;*/
+/*            else if index(logline, 'OBSERVATIONS')               gt 0 and*/
+/*                   (index(logline, 'NO OBSERVATIONS')            eq 0 and*/
+/*                    index(logline, ' 0 OBSERVATIONS')            eq 0) then delete=1;*/
+/*            else if index(logline, ' 0 OBSERVATIONS')            gt 0 and*/
+/*                    index(logline, 'WITH DUPLICATE KEY VALUES')  gt 0 then delete=1;*/
+			else if index(logline, 'OBSERVATIONS WITH DUPLICATE KEY VALUES WERE DELETED') gt 0 then delete=1;
+/*            else if index(logline, 'CHECK DUPLICATE RECORDS')    gt 0 then delete=1;*/
+/*            else if index(logline, 'CHECKING DUPLICATE')         gt 0 then delete=1;*/
+            else if index(logline, 'FORMAT')                     gt 0 and
+                    index(logline, 'NOT FOUND OR COULD NOT')     gt 0 then delete=1;
+                    
+            else if index(logline, 'EXPIRING SOON')              gt 0 then delete=1;
+          end;
+
+          if qclevel > 3 then do;
+            if      index(logline, 'QUESTION')                   gt 0 then delete=1;
+            else if index(logline, 'PROBLEM')                    gt 0 then delete=1;
+          end;
+
+          if qclevel > 4 then do;
+            * MACRO NOTES;
+            if      index(logline, 'MACRO)')                     gt 0 then delete=1;
+            else if index(logline, ' INFO ')                     gt 0 then delete=1;
+            else if index(logline, 'CORRESPONDS TO')             gt 0 then delete=1;
+            else if index(logline, 'DELIMETED')                  gt 0 then delete=1;
+            else if index(logline, 'TREATMENTS WERE DEFINED')    gt 0 then delete=1;
+          end;
+
+          if qclevel > 5 then do;
+            * FORMATS NOT FOUND NOTE;
+            if      index(logline, 'WAS NOT FOUND OR COULD NOT BE LOADED') gt 0 then delete=1;
+
+          end;
+        run;
+
+        data logfile;
+          set logfile;
+          if delete=1 then delete;
+        run;
+      %end;
+
+      * HANDLE CLEAN LOGS;
+      proc sql noprint;
+        select*
+         from work.logfile;
+      quit;
+
+      %if &sqlobs = 0 %then %do;
+        data logfile;
+          length file $100 logline $200;
+          logline = '';
+          file = "&file";
+          output;
+        run;
+      %end;
+
+      * OUTPUT RELEVANT LOG MESSAGES;
+      %if &i = 1 %then %do;
+        filename outfile "&outdir.\&outfile";
+      %end;
+
+      data _null_;
+        set logfile end=_eof;
+        file outfile notitles
+        %if &i > 1 %then %do;
+          mod;
+        %end;
+        %else %do;
+          ;
+        %end;
+
+        job = &i;
+
+        if _n_ eq 1 and 1 = &i then do;
+          put @20 "&sysdate &systime U_CHKALL MACRO  &indir.\&prefixes.* ";
+          put;
+       end;
+
+        if _n_ eq 1 then do;
+          put @3 '* * * * * * * * * * * * *  (' job +(-1)')  ' @40 file @70 '* * * * * * * * * * * * *;' ;
+          put @1 logline;
+        end;
+        else do;
+          put @1 logline;
+        end;
+
+        if _eof then do;
+          put;
+        end;
+      run;
+      %let i    = %eval(&i + 1);
+      %let file = %scan(&files, &i, ' ');
+    %end;
+  %end;
+  %else %put &flagtext NO &ext files to process in &indir;
+  %endmac:
+
+  %* RESTORE OPTIONS (ORDER IS IMPORTANT);
+  options &_center &_stimer &_source &_source2 linesize=&_ls &_mlogic &_symbolgen &_mprint  notes;
+%mend;
