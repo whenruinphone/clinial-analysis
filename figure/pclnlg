@@ -1,0 +1,234 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: f_pclnlg.sas,v $
+REV/REV        : $Revision: 1.3 $
+REV DATE       : $Date: 2018/08/20 07:53:02 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : DYG/HCSYCNNE0322
+PURPOSE        : Create 图14.4.3I 空腹试验个体血浆浓度- 线性比例和以10为底的对数比例- 药代动力学分析数据集
+						图14.4.3II 餐后试验个体血浆浓度- 线性比例和以10为底的对数比例- 药代动力学分析数据集
+INPUT FILES    : DERIVED.ADPC
+OUTPUT FILES   : f_14_4_3I_pclnlg, f_14_4_3II_pclnlg
+MACROS USED    : %mc_clrup
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+*---------------------------------------------------*
+*Load ADPC;
+*---------------------------------------------------*; 
+
+%mc_clrup;
+
+data _null_; 
+	length time $5 day_ $20. day2 $10;
+	test=time(); 
+	time=compress(put(test, time5.));
+	if length(time)=4 then time=strip('0'||compress(time));	
+	call symput("timehhmm",time);
+
+	day_="&sysdate9.";
+	day2=strip(put(input(day_, date9.), yymmdd10.));
+	call symput("day2",trim(left(day2)));	
+run;
+
+%let datetime=%str(&day2 &timehhmm);
+
+%let progname = f_pclnlg;
+%let dataset = %str(ADPC);
+%let gfont=%str(Courier);
+
+proc printto log="&figlog\&progname..log" new;run;
+
+%macro pc3(TRTGRPN=, outname=);
+
+%put >>>>> Start of program %upcase( &progname..sas ) <<<<< ;
+
+** change the default font;
+proc template;
+    define style myfont;
+    parent=rptstyle;
+    style GraphFonts from GraphFonts/
+         'GraphDataFont' = ("Albany AMT",6pt)
+         'GraphUnicodeFont' = ("Albany AMT",6pt)
+         'GraphValueFont' = ("Albany AMT",10pt)
+         'GraphLabelFont' = ("Albany AMT",8pt,bold)
+         'GraphFootnoteFont' = ("Albany AMT",6pt,bold)
+         'GraphTitleFont' = ("Albany AMT",6pt,bold)
+         'GraphAnnoFont' = ("Albany AMT",6pt);
+    end;
+run;
+
+**get required dataset;
+data adpc;
+	set derived.adpc;
+
+	if PKFL='是' and TRTGRPN=&TRTGRPN and trtan ne . and aval>=0;
+
+    header1="入组编号："||strip(RANDNUM); 
+
+	if aval>0 then aval_=log10(aval);
+	if aval_ ne .;
+
+	*because of font, add _ to trta let the output of right head right;
+	trta_=strip(trta)||'   _';
+
+	if atpt='给药前' then time=0;
+	else if atpt ne '给药前' then time=input(compress(atpt, '', 'kdp'), best.);
+
+	keep trtan trta atptn atpt aval avalc TRTGRPN TRTGRP PKFL RANDNUM header1 aval_ time trta_;
+run;
+
+proc sort data=adpc; 
+	by RANDNUM trtan time;
+run;
+
+data adpc;
+	set adpc;
+	by RANDNUM trtan time;
+	if first.RANDNUM then num+1;
+run;
+
+proc sql noprint;
+    select count(distinct RANDNUM) into :n from adpc;
+quit;
+%put &n;
+
+** Save dataset for QC;
+data figure.&outname.;
+    set adpc;
+    keep RANDNUM trta atpt aval aval_;
+run;
+
+data final;
+    set adpc;
+run;
+
+** fetch title and footnotes;
+%mc_gtbtf(titledset = derived.ddtitles, name = &outname.);
+%mc_adgtf;
+
+*** produce table;
+ods listing close;
+ods rtf file="&pathfig.\&outname..rtf" style=myfont nogtitle nogfootnote;
+
+%do h=1 %to &n;
+	data test&h;
+		set adpc;
+		if num=&h then do;
+			call symput('subject1',strip(header1)); 
+			output;
+		end;
+	run;
+%put &subject1;
+%let pg1=&h;
+%let pg2=&n;
+
+**Add page numbering;
+%mc_addpn(type=FI, data = final, by=RANDNUM trtan time, line=, pageno=%str(page=1;));
+
+** Create figure template for output *;
+ods path(prepend) work.templat(update);
+
+proc template;
+    define statgraph plot;
+        begingraph / designwidth = 850 designheight = 450 border=false;
+
+			discreteattrmap name="symbols" / ignorecase=true;
+			     value "受试制剂   _" / markerattrs=(symbol=circle size=8.5 color=green) lineattrs=(color=green);
+			     value "参比制剂   _" / markerattrs=(symbol=square size=8.5 color=blue) lineattrs=(color=blue);
+			enddiscreteattrmap;
+     		discreteattrvar attrvar=trtmarkers var=trta_ attrmap="symbols";
+
+             entrytitle halign=center "&subject1  " / textattrs=(size=13 /*family='Courier'*/);
+             entrytitle halign=center " ";
+             entrytitle halign=center " ";
+
+        layout lattice / rowdatarange=data columndatarange=data  columns=2 rowgutter=10 columngutter=10 columnweights=(1.0 1.0);
+
+           layout overlay / xaxisopts=(display=(ticks tickvalues label line) tickvalueattrs=(size=8.5pt) 
+                                        linearopts=(minorticks=ON 
+                                            tickvaluelist=(0.5 6 12 16 24 36 48 72)  
+                                            tickdisplaylist=('0.5' '6' '12' '16' '24' '36' '48' '72')
+											viewmin=0
+											viewmax=75
+										)
+                                            label = "时间(小时)" labelattrs = (size = 8.5pt weight=bold)
+                                            gridDisplay=Auto_On
+                                        )
+                             yaxisopts=(display=(ticks tickvalues label line) tickvalueattrs=(size=8.5pt)
+										linearopts=(minorticks=ON
+/*                                            THRESHOLDMIN=1*/
+/*                                            THRESHOLDMAX=1*/
+											viewmax=25
+                                        )   
+                                        label = "血浆中药物的平均浓度(ng/m L)" 
+                                        labelattrs = (size = 8.5pt weight=bold) 
+                                        gridDisplay=Auto_On);
+                entry halign=center "线性比例    "  / location=outside valign=top textattrs=(size=13 );
+
+                seriesplot x=time y=aval / display=all group=trtmarkers name="symbols" lineattrs=(pattern=solid); 
+/*                scatterplot x=time y=aval / group=trtmarkers yerrorlower=lower  yerrorupper=upper name='scatter';*/
+                referenceline y=0.1 / name="reference" lineattrs=(pattern=SHORTDASH);
+	    	    discretelegend "symbols" / location=inside across=1 halign=right valign=top 
+										   valueattrs=(size=8.5pt);
+            endlayout;
+
+            layout overlay / xaxisopts=(display=(ticks tickvalues label line) tickvalueattrs=(size=8.5pt) 
+                                        linearopts=(minorticks=ON 
+                                        	tickvaluelist=(0.5 6 12 16 24 36 48 72)  
+                                            tickdisplaylist=('0.5' '6' '12' '16' '24' '36' '48' '72')
+											viewmin=0
+											viewmax=75
+										)
+                                            label = "时间(小时)" labelattrs = (size = 8.5pt weight=bold)
+                                            gridDisplay=Auto_On
+                                        )
+                             yaxisopts=( type=log 
+										logopts=(base=10 tickintervalstyle=logexpand 
+											tickvaluepriority=true /*minorticks=true minorgrid=true*/ 
+											tickvaluelist=(0.1 1 10 100)
+											viewmax=100
+										) 
+										/*linearopts=(
+												viewmax=1500
+												minorticks=ON
+												tickvaluelist=(1 10 100 1000 1500 ) 
+												tickdisplaylist=("1" "10" "100" "1000" "1500") 
+												
+											) 	*/
+                                        display=(ticks tickvalues label line) tickvalueattrs=(size=8.5pt)  
+                                        label = "血浆中药物的平均浓度(以10为底的对数)(ng/m L)" 
+                                        labelattrs = (size = 8.5pt weight=bold) 
+                                        gridDisplay=Auto_On);
+                entry halign=center "10为底的对数比例     "  / location=outside valign=top textattrs=(size=13 );
+
+                seriesplot x=time y=aval / display=all group=trtmarkers name="symbols" lineattrs=(pattern=solid); 
+/*                scatterplot x=time y=aval / group=trtmarkers yerrorlower=lower  yerrorupper=upper name='scatter';*/
+                referenceline y=0.1 / name="reference" lineattrs=(pattern=SHORTDASH);
+	    	    discretelegend "symbols" / location=inside across=1 halign=right valign=top 
+										   valueattrs=(size=8.5pt);
+          endlayout;
+
+        endlayout;
+      endgraph;
+  end;
+run;
+
+proc sgrender data = final(where=(header1="&subject1."))  template = plot;
+run;
+
+%end;
+
+%mend;
+%pc3(TRTGRPN=1, outname=f_14_4_3I_pclnlg);
+%pc3(TRTGRPN=2, outname=f_14_4_3II_pclnlg);
+
+ods rtf close;
+ods listing;
+
+*clean out work datasets;
+%mc_clrup;
+
+proc printto;
+run;
