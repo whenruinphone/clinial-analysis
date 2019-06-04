@@ -1,0 +1,173 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile:  $
+REV/REV        : $Revision:  $
+AUTH           : $Author:  $
+REV DATE       : $Date:  $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT  : JRY/HJRYCNHV0222
+PURPOSE         : Macros to create ISO date times
+INPUT FILES     : 
+OUTPUT FILES    : 
+MACROS USED     :
+NOTES           : indt = date variable to be converted.  If date variable is split into
+                :   three varaiables (i.e. day,month,year) then specify the characters that idendify 
+                :   these variables e.g. if variables are aeendd, aeenmm and aeendd then
+                :   indt=aeen
+                : outdt= ISO date variable to be created
+                : timehh = if date time variable is required then specify the name of the hour variable
+                : timemi = if date time variable is required then specify the name of the minute variable
+                : timess = if date time variable is required then specify the name of the second variable
+                : split= If the original date is split across 3 variables (i.e. variable for day,
+                :   variable for month and variable for year) then set split=Y
+                :
+                : Modified by C. Heins 07Dec2009
+                :   In SPLIT section changed reference to &indt.yy from character to numeric
+                :     to remove character to numeric conversion message
+                :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro isodt(indt=NULL,year=NULL,month=NULL,monthc=NULL,day=NULL,intim=NULL,hour=NULL,minute=NULL,second=NULL,outdt=NULL);
+
+    attrib 
+        qcyear 	length=$4.
+        qcmonth 	length=$2.
+        qcday 	length=$2.
+        qchour 	length=$2.
+        qcminute 	length=$2.
+        qcsecond 	length=$2.
+		qcmontht    length=$3.
+        ;
+
+    qcyear="";
+    qcmonth="";
+    qcday="";
+    qchour="";
+    qcminute="";
+    qcsecond="";
+	qcmontht="";
+
+    %if &indt. ne NULL %then %do;
+
+    &indt.=compress(strip(&indt.),,'kg');
+
+    /******************************************************************************
+    * Add a leading zero to the day if necessary.
+    ******************************************************************************/
+    if length(&indt) < 11 then do; 
+        if length(&indt)=8 then &indt = '0' ||strip(&indt);
+        *IF &INDT='A' /'D' /'P' THE &INDT='';
+        if trim(&indt)="Unknown"  or compress(&indt)="A"  or compress(&indt)="D"  
+                or compress(&indt)="P"  or compress(&indt)="U"  then &indt=" ";
+    end;
+    if length(compress(scan(&indt, 1, '-'))) =3 then &indt.=substr(&indt,1,1)||scan(&indt, 2, '-');
+    if length(compress(&indt.,"-")) ne 0 then do;
+        qcday=substr(compress(&indt.,"-"),1,2); 
+        if compress(qcday,"00123456789") ne "" then qcday='';
+
+        qcmontht=substr(compress(&indt.,"-"),3,3);
+        if upcase(qcmontht)="JAN" then qcmonth="01";
+        else if upcase(qcmontht)="FEB" then qcmonth="02";
+        else if upcase(qcmontht)="MAR" then qcmonth="03";
+        else if upcase(qcmontht)="APR" then qcmonth="04";
+        else if upcase(qcmontht)="MAY" then qcmonth="05";
+        else if upcase(qcmontht)="JUN" then qcmonth="06";
+        else if upcase(qcmontht)="JUL" then qcmonth="07";
+        else if upcase(qcmontht)="AUG" then qcmonth="08";
+        else if upcase(qcmontht)="SEP" then qcmonth="09";
+        else if upcase(qcmontht)="OCT" then qcmonth="10";
+        else if upcase(qcmontht)="NOV" then qcmonth="11";
+        else if upcase(qcmontht)="DEC" then qcmonth="12";
+        else qcmonth="-"; 
+
+        qcyear=substr(compress(&indt.,"-"),6/*,4*/);
+    end;
+    %end;
+
+
+    %if &year. ne NULL %then %do;
+        if &year. ne ''  then qcyear=strip(&year.);
+        else if &year. in ( '','0000') then qcyear="-";
+    %end;
+
+    %if &month. ne NULL %then %do;
+        if &month. ne . then qcmonth=strip(put(&month.,best.));
+        else if &month. = . then qcmonth="-";
+        if length(qcmonth)=1 and qcmonth ne '-' then qcmonth = '0'||strip(qcmonth);
+    %end;
+
+    %if &monthc. ne NULL %then %do;
+        if upcase(&monthc.)="JAN" then qcmonth="01";
+        else if upcase(&monthc.)="FEB" then qcmonth="02";
+        else if upcase(&monthc.)="MAR" then qcmonth="03";
+        else if upcase(&monthc.)="APR" then qcmonth="04";
+        else if upcase(&monthc.)="MAY" then qcmonth="05";
+        else if upcase(&monthc.)="JUN" then qcmonth="06";
+        else if upcase(&monthc.)="JUL" then qcmonth="07";
+        else if upcase(&monthc.)="AUG" then qcmonth="08";
+        else if upcase(&monthc.)="SEP" then qcmonth="09";
+        else if upcase(&monthc.)="OCT" then qcmonth="10";
+        else if upcase(&monthc.)="NOV" then qcmonth="11";
+        else if upcase(&monthc.)="DEC" then qcmonth="12";
+        else qcmonth="-";
+    %end;
+
+    %if &day. ne NULL %then %do;
+        if &day. ne ''  then qcday=strip(&day.);
+        else if &day. in ('', 'Unknown') then qcday="-";
+        if length(qcday) = 1 and qcday ne '-' then qcday='0'||strip(qcday);
+    %end;
+
+    *time;
+
+    %if &intim. ne NULL %then %do;
+	    time=strip(&intim.);
+        IF COMPRESS(time)^='U' THEN DO;
+/*            timeh1=SCAN(&intim.,1,':');*/
+            if (length(compress(time))=4 or length(compress(time))=7) & strip(time) ne '' then timeh1=compress('0'||strip(time));
+			else if strip(time) ne '' then timeh1=compress(time);
+            if not missing(timeh1) then qchour=substr(compress(timeh1),1,2);
+            if strip(qchour) in ('0.','0' )then qchour='';
+            if not missing(timeh1) then qcminute=substr(compress(timeh1),4,2);
+            if not missing(timeh1) then qcsecond=SCAN(compress(timeh1),3,':');
+        end;
+        drop timeh1;
+    %end;
+    %if &hour. ne NULL %then %do;
+        if &hour. ne "" and compress(&hour.,"0123456789")="" then qchour=&hour.;
+        else if &hour. = "" or compress(&hour.,"0123456789") ne "" then qchour="-";
+    %end;
+
+    %if &minute. ne NULL %then %do;
+        if &minute. ne "" and compress(&minute.,"0123456789")="" then qcminute=&minute.;
+        else if &minute. = "" or compress(&minute.,"0123456789") ne "" then qcminute="-";
+    %end;
+
+    %if &second. ne NULL %then %do;
+        if &second. ne "" and compress(&second.,"0123456789")="" then qcsecond=&second.;
+        else if &second. = "" or compress(&second.,"0123456789") ne "" then qcsecond="-";
+    %end;
+
+    if qcyear in ("","0000") then qcyear="-";
+    if qcmonth="" then qcmonth="-";
+    if upcase(qcday) in ("WN","UK","UN","NK", "97") then qcday="-";
+    if qcday="" or qcday='00' then qcday="-";
+    if qchour="" then qchour="-";
+    if qcminute="" then qcminute="-";
+    if qcsecond="" then qcsecond="-";
+
+    &OUTDT.=compress(qcyear||"-"||qcmonth||"-"||qcday||"T"||qchour||":"||qcminute||":"||qcsecond);
+/*	&OUTDT.=compress(qcyear||"-"||qcmonth||"-"||qcday||"T"||qchour||":"||qcminute);*/
+
+    do i=1 to 20;
+        if &outdt.="-"  then &outdt.="";
+        else if substr(&outdt.,length(&outdt.),1) in ("T",":","-") then &outdt.=substr(&outdt.,1,length(&outdt.)-1);
+    end;
+
+    &outdt.=strip(&outdt.);
+    if &outdt.="." then &outdt.="";
+
+    drop qcyear qcmonth qcday qchour qcminute qcsecond qcmontht i;
+
+%mend isodt;
