@@ -1,0 +1,453 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: mattrib.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: chen_yuanyuan0701 $
+REV DATE       : $Date: 2019/02/01 02:04:27 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :N/A
+PURPOSE        :To assign SAS variable formats and labels as specified
+               : in the data definition table
+               : In case of character variables with no format assigned
+               : mattrib uses the format "$" + length of variable.
+               : In case of a numeric variable with no format assigned
+               : mattrib uses format 'best.'
+               : The macro also checks if variables in the DDT are not created 
+               : or if variables are in the dataset that are not
+               : specified in the data definition table.
+               : Also orders variables as in the DDT.
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :Macro Parameters:
+               : INDS    - Name of the input (derived) dataset
+               :           Needs to be in the WORK library
+               : HELP    - Produce instructions for use
+               : OUTDS   - New name in case of renaming
+               :           (DEFAULT: &INDS)
+               : DSNAME  - Name of the derived dataset in the
+               :           data definition table (DEFAULT: &inds)
+               : DDTFILE - Name of the SAS dataset containing the data definition
+               :           table (DEFAULT: DDT) - created by Load_DDT.sas
+               : DDTLIB  - Library of the DDT datasets
+               : HEADER  - NO if not using headers from another DDT tab, 
+               :         - else dataset name used as header(DEFAULT: NO)
+               : DLABEL  - OUTDS dataset label
+               : CLEANUP - Flag indicating if all datasets created
+               :           during the call of MATTRIB shall be deleted
+               :           (DEFAULT: YES)
+               :
+               : Structure of dataset assigned to DDTFILE:
+               : The file must contain at least the following variables:
+               :   MEMNAME - Name of the SAS dataset
+               :   ITMNAME - Name of the SAS variable 
+               :             (type:char)
+               :   ITMLAB  - Label of thes SAS variable (type:char)
+               :   ITMLEN  - Length of the SAS variable (type:num)
+               :   ITMTYPE - Type of the SAS variable (NUM/CHAR) (type: CHAR)
+               :   ITMFORM - Format to be assigned to the SAS variable
+               :             (type:char)
+               :
+               : (v. 2 2008-09-26 added ordering of variables)
+               : (v. 2.1 2008-10-02 fixed ordering of variables to work for any value of header parameter)
+               : v. 2.2 2008-10-10 eliminated warning from merge
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+%macro mattrib ( inds            ,
+                 help    =       ,
+                 ddtfile = adms  ,
+                 outds   = &inds ,
+                 dsname  = &inds ,
+                 ddtlib  = work  ,
+                 header  = NO    , 
+                 dlabel  =       ,
+                 cleanup = YES   );
+  %local optval wclause numobs1 numobs2 ddtobs ;
+
+  %if &help eq ? %then %do;
+    %put;
+    %put;
+    %put ***********************************************************************************************;
+    %put ***********************************************************************************************;
+    %put To assign SAS variable formats and labels as specified in the data definition table.;
+	%put ;
+    %put The macro also checks if variables are not created so far or if variables are in the dataset;
+    %put that are not specified in the data definition table;
+    %put In case of character variables with no format assigned mattrib uses the format "$" + length of;
+    %put variable.;
+	%put ;
+    %put In case of a numeric variable with no format assigned mattrib uses format 'best.';
+	%put ;
+    %put Macro Parameters:;
+    %put INDS    - Name of the input (derived) dataset. Needs to be in the WORK library;
+	%put HELP    - To produce these instructions;
+    %put OUTDS   - New name in case of renaming (DEFAULT: &INDS);
+    %put DSNAME  - Name of the derived dataset in the data definition table (DEFAULT: &INDS);
+    %put DDTFILE - Name of the SAS dataset containing the data definition table (DEFAULT: DDT);
+	%put DDTLIB  - Library that contains the data definition table dataset. (Default: work);
+    %put HEADER  - NO if not using headers from another DDT tab, else dataset name used;
+    %put         - as header(DEFAULT: NO);
+	%put DLABEL  - OUTDS dataset label;
+    %put CLEANUP - Flag indicating if all datasets created during the call of MATTRIB shall be deleted;
+    %put           (DEFAULT: YES);
+    %put ;
+    %put Structure of dataset assigned to DDTFILE:;
+    %put The file must contain at least the following variables:;
+    %put   MEMNAME - Name of the SAS dataset;
+    %put   ITMNAME - Name of the SAS variable (type:char);
+    %put   ITMLAB  - Label of the SAS variable (type:char);
+    %put   ITMLEN  - Length of the SAS variable (type:num);
+    %put   ITMTYPE - Type of the SAS variable (NUM/CHAR) (type: CHAR);
+    %put   ITMFORM - Format to be assigned to the SAS variable (type:char);
+    %put ***********************************************************************************************;
+    %put ***********************************************************************************************;
+    %put;
+    %put;
+    %goto exit;
+  %end;
+
+  /* HF, 13-Jun-2004 --- added DDTLIB option */
+
+  %put ***** MACRO MATTRIB assigns formats and labels to SAS variables. ;
+  %put ***** ;
+  %put *****                                        Parameter           ;
+  %put *****     Explanation                    Name      Value         ;
+  %put *****     ====================================================== ;
+  %put *****     Input dataset:                 INDS    = &inds ;
+  %put *****     Output dataset:                OUTDS   = &outds ;
+  %put *****     Dataset name in DDT dataset:   DSNAME  = &dsname ;
+  %put *****     DDT file name:                 DDTFILE = &ddtfile ;
+  %put *****     DDT library:                   DDTLIB  = &ddtlib ;
+  %put *****     Dataset with HEADER variables? HEADER  = &header ;
+  %put *****     Output dataset label:          DLABEL  = &dlabel ;
+  %put *****     Cleanup intermediate datasets? CLEANUP = &cleanup ;
+  %put *****     ====================================================== ;
+
+  *** check for relevant input datasets *** ;
+  %if %sysfunc(exist(&inds)) = 0 %then
+    %put ER%str(ROR:) File %upcase(&inds) does not exist !!! ;
+  /* HF, 13-Jun-2004 --- added &DDTLIB */
+  %if %sysfunc(exist(&ddtlib..&ddtfile)) = 0 %then
+    %put ER%str(ROR:) File %upcase(&ddtlib..&ddtfile) does not exist !!! ;
+
+  *** check structure of DDTFILE *** ;
+  /* HF, 13-Jun-2004 --- replaced WORK by &DDTLIB */
+  %if %sysfunc(exist(&ddtlib..&ddtfile)) %then %do ;
+    proc sql ;
+      create table strkfile as
+        select name, type, length
+          from dictionary.columns
+         where libname="%upcase(&ddtlib.)" and memname="%upcase(&ddtfile.)"
+         order by name
+        ;
+    quit ;
+
+    data strkfile ;
+      set strkfile ;
+      if upcase ( name ) in ('MEMNAME','ITMNAME','ITMLAB','ITMTYPE','ITMLEN','ITMFORM') ;
+    run ;
+
+    data _null_ ;
+      set strkfile ;
+      call symput ( 'ddtobs' , put ( _N_ , best. ) ) ;
+    run ;
+
+    %if &ddtobs lt 6 %then
+       %put ER%str(ROR:) Check structure of %upcase ( &ddtlib..&ddtfile ) ;
+    %end ; 
+
+  %if %sysfunc(exist(&inds)) and %sysfunc(exist(&ddtlib..&ddtfile)) and &ddtobs eq 6 %then %do ;
+    *** Based on the order of the DDT variables for this datasets setup macro ***;
+	*** variables to control order for final output                           ***;
+    *** 02OCT2008 Added _base1_, _header_ and _base_ steps and replaced set   ***;
+    *** statement in _order1_ in order to obtain the header file and order it ***;
+    *** properly. Also added tempinds                                         ***;
+    data tempinds; * To preserve incoming set to compare on later             ***;
+      set &inds; 
+    run;
+ 
+    data _base1_;
+	  set &ddtlib..&ddtfile;
+      where memname in ("%upcase(&dsname)") ;
+	run;
+                                    
+    %if %upcase(&header) ne NO %then %do;
+	    data _header_;
+		  set &ddtlib..&ddtfile;
+	      where memname in ("&header") ;
+		run;
+	%end;
+
+	data _base_;
+	  set %if %upcase(&header) ne NO %then %do; _header_ %end; 
+          _base1_ ;
+	run;
+
+	data _order1_;
+	  set _base_ end=eof;
+		 
+	  length _length_ $12 _var_ $200;
+ 	  select(upcase(itmtype));
+	     when('CHAR') _length_='$'||strip(put(itmlen,best.));
+		 when('NUM' ) _length_=strip(put(itmlen,best.));
+		 otherwise;
+	  end;
+	  _var_= strip(itmname)||' '||strip(_length_);
+	  _order_=_n_;
+	  keep _order_ _var_;
+	  retain _bigst_;
+	  if _n_ eq 1 then _bigst_=_n_;
+	  else if _n_ gt _bigst_ then _bigst_ = _n_;
+	  if eof then do;
+         call symput('_bigst_',strip(put(_bigst_,best.)));
+	  end;
+	  call symput('_var'||strip(put(_order_,best.)),strip(_var_));
+	run;
+
+    *** Create the outds datasets ***;
+    *** To be clearer in the messages always to INDS is referred to in notes, *** ;
+    *** war nings, or er rors                                                 *** ;
+    data &outds %if &dlabel eq %then; %else (label=&dlabel);;
+	    length
+		%do i = 1 %to &_bigst_;
+		   &&_var&i
+		%end;;
+      set &inds ;
+    run ;
+ 
+    *** select variables for INDS from DDTFILE *** ;
+    %if %upcase(&header) ne NO %then
+      %let wclause = %str(,"&HEADER");
+    %else
+      %let wclause = %str();
+
+    /* HF, 13-Jun-2004 --- added &DDTLIB */
+    data attinfo ;
+      set &ddtlib..&ddtfile ;
+      where memname in ( "%upcase(&dsname)" &wclause ) ;
+    run ;
+
+    *** check if format names are correct in &ddtfile *** ;
+    data attinfo ;
+      set attinfo ;
+      if compress( itmform ) ne ' ' then do ;
+        if index( itmform , '.' ) then do ;
+          if length( itmform ) = length( compress( itmform )) then ; *** do noting *** ;
+          else do ;
+            put "WARN" "ING: Check for blanks in format name: " memname= itmname= itmform= ;
+            itmform = compress( itmform ) ;
+          end ;
+        end ;
+        else do ;
+          put "WARN" "ING: Period is missing in format name: " memname= itmname= itmform= ;
+          itmform = compress( itmform ) || '.' ;
+        end ;
+      end ;
+    run ;
+
+    *** check if all variables are available and drop *** ;
+    *** unassignd variables from attinfo file for     *** ;
+    *** further processing                            *** ;
+	/* variable '_name' added for order process */
+	/* 02OCT08 RBR changed to tempinds from &outds */
+    proc sql ;
+      create table attfile (drop=_name) as
+        select upcase(name) as _name, name, type, length
+          from dictionary.columns
+         where libname="WORK" and memname="%upcase(tempinds)"
+         order by _name
+        ;
+    quit ;
+
+    *** check completeness of variables in dataset INDS *** ;
+    proc sql ;
+      create table novar as
+        select *
+          from attinfo
+         where upcase(itmname) not in (select upcase(name) from attfile) ;
+
+      create table noinfo as
+        select *
+          from attfile
+         where upcase(name) not in (select upcase(itmname) from attinfo ) ;
+
+	  /* variable '_itmname' added for order process */
+      create table attinfo2 (drop=_itmname) as
+        select upcase(itmname) as _itmname,*
+          from attinfo
+         where upcase(itmname) in (select upcase(name) from attfile)
+         order by _itmname ;
+    quit ;
+    
+    ************************* ;
+    *** reporting section *** ;
+    ************************* ;
+
+    ***switch of the SOURCE and NOTES and mprit option *** ;
+    %let optval=%sysfunc(getoption(source)) %sysfunc(getoption(notes)) %sysfunc(getoption(mprint));
+    options nosource nonotes nomprint;
+
+    %let numobs1=0;  /*** check if there are variables that are not created in INDS ***/
+    data _null_ ;
+      set novar end=fin;
+
+      if fin and _N_>0 then
+        call symput ( 'numobs1' , '1' ) ;
+    run ;
+
+    %let numobs2=0;      /*** check if there are variables that are not specified in DDT ***/
+    data _null_ ;
+      set noinfo end=fin;
+
+      if fin and _N_>0 then
+        call symput ( 'numobs2' , '1' ) ;
+    run ;
+
+    %if &numobs1 = 1 %then %do ;
+      data _null_ ;
+        do i = 1 to 3 ;
+          put "ER" "ROR: The following variables are not created in dataset %upcase(&inds.):" ;
+        end ;
+      run ;
+
+      data _null_ ;
+        set novar end=fin;
+        put "ER" "ROR: Variable " itmname " is mis" "sing!" ;
+
+        if fin then
+          put "ER" "ROR: In total " _N_ " variables are mis" "sing!";
+      run ;
+    %end ; /* %if &numobs1 = 1 %then %do */
+    %else
+      %put ***** MACRO MATTRIB: All variables that are specified in %upcase(&ddtfile) are created in dataset %upcase(&inds). ;
+
+    %if &numobs1 = 1 and &numobs2 = 1 %then %do ;
+      data _null_ ;
+        do i = 1 to 2 ;
+          put '_    ' ;  /*** empty lines ***/
+        end ;
+      run ;
+    %end ; /* %if &numobs1 = 1 and &numobs2 = 1 %then %do */
+
+    %if &numobs2 = 1 %then %do ;
+      data _null_ ;
+        do i = 1 to 3 ;
+          put "ER" "ROR: The following variables from dataset %upcase(&inds.) are not specified in the DDT:" ;
+        end ;
+      run ;
+
+      data _null_ ;
+        set noinfo end=fin;
+        put "ER" "ROR: Variable " name " is not specified!" ;
+
+        if fin then
+          put "ER" "ROR: In total " _N_ " variables are not specified!";
+      run ;
+    %end ; /* %if &numobs2 = 1 %then %do */
+    %else
+      %put ***** MACRO MATTRIB: All variables in %upcase(&inds) are specified in %upcase(&DDTfile.). ;
+
+    options &optval ; /*** re-assign options source, notes, mprint ***/
+
+    *** check variable type and report differences *** ;
+    data attinfo2 ;
+      set attinfo2 ;
+	  length name1 $200;
+      itmname=upcase(itmname);
+	  name1=itmname;
+    run ;
+
+    data attfile ;
+	  length name1 name $200;
+      set attfile ;
+      name=upcase(name) ;
+	  name1=name;
+    run ;
+
+    data _chktype_ (drop=name1);
+      merge attfile (in=a)
+            attinfo2 (in=b rename=(itmname=name) keep=name1 itmname itmtype itmlen) ;
+      by name1 ;
+
+      _difftyp = 0 ;
+      _difflen = 0 ;
+      if a and b then do ;
+        if upcase ( type ) ne upcase ( itmtype ) then do ;
+          put "WARN" "ING: Type is not the same: " name ": &inds.: " type ", ATTFILE: " itmtype ;
+          _difftyp = 1 ;
+        end ;
+
+        if (length ne itmlen) and _difftyp=0 then do ;
+          put "WARN" "ING: Length is not the same: " name ": &inds.: " length ", ATTFILE: " itmlen ;
+          _difflen = 1 ;
+        end ;
+      end ;
+    run ;
+
+    *** assign length and formats only if the variable type (NUM/CHAR) is correct *** ;
+    proc sql;
+      create table attinfo3 as
+        select *
+          from attinfo2
+          where upcase(itmname) not in ( select upcase(name) from _chktype_ where _difftyp=1)
+        ;
+    quit ;
+
+    *** assign labels *** ;
+    data _null_ ;
+      set attinfo2 end=fin ;
+
+      if _N_=1 then do ;
+        call execute ("proc datasets lib=work nolist ; modify &outds; label ");
+      end ;
+
+      *call execute ( trim(left(itmname)) || " ='" || trim(left(itmlab)) || "'");
+	  * 13FEB2008 Reversed the tick types (RBR);
+      call execute ( trim(left(itmname)) || ' ="' || trim(left(itmlab)) || '"');
+
+      if fin then
+        call execute ('; quit;') ;
+    run ;
+
+    *** assign formats (only if variable type is correct) *** ;
+    data _null_ ;
+      set attinfo3 end=fin ;
+
+      if upcase(itmtype)='CHAR' then do ;
+        if compress(itmform)=' ' then
+          itmform = compress( '$' || left(put(itmlen,best.)) || '.') ;
+      end ;
+
+      if upcase(itmtype)='NUM' then do ;
+        if compress(itmform)=' ' then
+          itmform = 'best.' ;
+      end ;
+
+      if _N_=1 then do ;
+        call execute ("proc datasets lib=work nolist; modify &outds; format ");
+      end ;
+
+      if compress(itmform) ne ' ' then
+        call execute ( trim(left(itmname)) || " " || trim(left(itmform)) || " ");
+
+      if fin then
+        call execute ('; quit;') ;
+    run ;
+  %end ;   /* %if %sysfunc(exist(&inds)) and %sysfunc(exist(&ddtfile)) and &ddtobs eq 6 %then %do ;*/
+
+  *** clean up *** ;
+  %if %upcase(&cleanup)=YES %then %do;
+    proc datasets lib = work nolist ;
+      delete strkfile attfile attinfo attinfo2 attinfo3 
+             novar noinfo _chktype_ _order1_ /*_header_*/ _base1_ _base_ tempinds /memtype=data;
+    quit ;
+	%if %sysfunc(exist(_header_)) %then %do;
+	 proc datasets lib = work nolist ;
+	  delete _header_;
+	 quit;
+	%end;
+  %end ;
+  %exit:;
+%mend mattrib ;
+
