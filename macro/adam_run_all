@@ -1,0 +1,80 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: ADAM_run_all.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/07/13 08:32:07 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : Run all batch program and check log 
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          : DO CVS update before run this batch program
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+%mc_clrup; * delete work files and reset options ;
+
+
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adsl.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adae.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adcm.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\admh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adex.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adeg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adlb.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\advs.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adpe.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adml.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adie.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adpc.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\adpp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\Production\addv.sas";
+
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL MAIN LOGS **;
+*-----------------------------------------------------------------------------;
+
+
+%_chklogs(
+  indir    =&adamlog.,
+  outfile  =runall_adam_main,
+  prefixes =a);
+
+
+*-----------------------------------------------------------------------------;
+* Run all QC programs ;
+*-----------------------------------------------------------------------------;
+
+
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adsl.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adae.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adcm.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_admh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adex.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adeg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adlb.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_advs.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adpe.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adml.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adie.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adpc.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_adpp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\Derived\qc\qc_addv.sas";
+
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL QC LOGS **;
+*-----------------------------------------------------------------------------;
+
+
+%_chklogs(
+  indir    =&qadamlog.,
+  outfile  =runall_adam_qc,
+  prefixes =q);
+
+
+%mc_clrup; * delete work files and reset options ;
