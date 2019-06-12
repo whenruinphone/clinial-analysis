@@ -1,0 +1,162 @@
+*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: TFL_run_all.sas,v $
+REV/REV        : $Revision: 1.4 $ 
+AUTH           : $Author: lu_zhiwan $
+REV DATE       : $Date: 2018/09/19 08:06:28 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : CSY/HCSYCNNE0322
+PURPOSE        : Run all TFL program and check log
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          : DO CVS update before run this batch program
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+*** List all temporary datasets in work library ***;
+%mc_clrup;
+
+
+options nocenter nomprint nosource;
+*-----------------------------------------------------------------------------;
+* Run all MAIN CSY/HCSYCNNE0322/TFLs programs ;
+*-----------------------------------------------------------------------------;
+
+**Tables;
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_disp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_demog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_dev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_mh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_ex.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_pc.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_pp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_ppbe.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_pptost.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_cm.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aesumseq.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aesumtrt.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aesumper.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aeseq.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aetrt.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aeper.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aeseqsev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aetrtsev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aepersev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aeseqrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aetrtrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_aeperrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_lb.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_lbshft.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_vs.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_ecg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_ecgshft.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_trtdemog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\Production\t_csrpc.sas";
+
+
+*Listings;
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_disp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_dev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_crit.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_demog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_mh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_surg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_cm.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_pc.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_pp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_ae.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_lb.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_preg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_drug.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_alcoh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_blood.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_chest.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_pe.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_vs.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_ecg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_ml.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Listings\Production\l_ex.sas";
+
+
+*Figures;
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Figures\Production\f_pclin.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Figures\Production\f_pclog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Figures\Production\f_pclnlg.sas";
+
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL MAIN LOGS **;
+*-----------------------------------------------------------------------------;
+
+%_chklogs(
+  indir    =&tablog.,
+  outfile  =all_table_main,
+  prefixes =t);
+
+%_chklogs(
+  indir    =&listlog.,
+  outfile  =all_listing_main,
+  prefixes =l);
+
+%_chklogs(
+  indir    =&figlog.,
+  outfile  =all_figure_main,
+  prefixes =f);
+
+
+*-----------------------------------------------------------------------------;
+* Run all QC TFLs programs ;
+*-----------------------------------------------------------------------------;
+
+**Tables;
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_disp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_demog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_dev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_mh.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_ex.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_pc.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_pp.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_ppbe.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_pptost.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_cm.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aesumseq.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aesumtrt.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aesumper.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aeseq.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aetrt.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aeper.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aeseqsev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aetrtsev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aepersev.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aeseqrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aetrtrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_aeperrel.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_lb.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_lbshft.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_vs.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_ecg.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_ecgshft.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_trtdemog.sas";
+%include "&SASPath\CSY\HCSYCNNE0322\TFL\Tables\QC\qc_t_csrpc.sas";
+
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL TABLE QC LOGS **;
+*-----------------------------------------------------------------------------;
+
+%_chklogs(
+  indir    =&qtablog.,
+  outfile  =all_table_qc,
+  prefixes =q);
+
+%mc_clrup; * delete work files and reset options ;
+
+
+*-----------------------------------------------------------------------------;
+* CHECK ALL TABLE COMPARE RESULTS **;
+*-----------------------------------------------------------------------------;
+option nocenter; 
+
+
+
