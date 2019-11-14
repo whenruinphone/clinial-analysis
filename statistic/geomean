@@ -1,0 +1,8 @@
+***geo mean;
+	proc sql noprint;
+		create table geo as select EXP(SUM(LOG(ADOSE)))**(1/COUNT(ADOSE)) as geomean ,CANCLASN,avisitn,avisit
+		from pc where ADOSE^=. and ADOSE^=0
+	/*	where PARAMN<=3*/
+	    group by  avisitn, avisit,CANCLASN
+	    order by  avisitn, avisit,CANCLASN;
+	quit;
