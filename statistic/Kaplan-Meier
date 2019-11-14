@@ -22,5 +22,11 @@ proc phreg data=adtte;
     model aval*cnsr(1)=trt01pn sexn egfrn rmbfn/risklimits alpha=0.05;     
 run;
 
+**PFS率;
+proc lifetest data=adtte timelist=1,3,6 outsurv=i_timelist reduceout;
+	time aval*cnsr(1);
+	strata trt01pn;
+run;
+
 **ods trace off;
 ods graphics on;
