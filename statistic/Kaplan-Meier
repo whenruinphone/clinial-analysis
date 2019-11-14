@@ -1,0 +1,26 @@
+**采用Kaplan-Meier方法估计中位DOR及其95%置信区间。;
+ods graphics off;
+**ods trace on;
+proc lifetest data=adtte;
+	time aval*cnsr(1);
+	strata trt01pn;
+	ods output Quartiles=i_qrt(rename=(lowerlimit=LCLM upperlimit=UCLM));
+run;
+
+**P值由分层log-rank检验得出（MIL60组 vs. 贝伐珠单抗组）。;
+proc lifetest data=adtte ;
+     time aval*cnsr(1);
+     strata sexn egfrn rmbfn / missing group=trt01pn;
+	ods output HomTests=p_value(where=(Test="Log-Rank"));
+run;
+
+**HR: Hazard Ratio， 两组风险比
+HR与其95%置信区间由Cox模型得出，模型包括组别和分层因素，分层因素为性别、EGFR基因状态（野生型vs.突变型），和有无脑转移。;
+ods output parameterestimates=i_hr(where=(Parameter="TRT01PN"));
+proc phreg data=adtte;
+	class trt01pn(ref='2') sexn(ref="1") egfrn(ref="1") rmbfn(ref="1")/param=reference;
+    model aval*cnsr(1)=trt01pn sexn egfrn rmbfn/risklimits alpha=0.05;     
+run;
+
+**ods trace off;
+ods graphics on;
