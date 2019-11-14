@@ -1,0 +1,55 @@
+
+ods listing close;
+ods output lsmeans=ls;
+/*ods output diffs=diff;*/
+/*ods trace on;*/
+proc mixed data=pprac;
+	by  paramcd param;
+	class  CANCLASN_ /*subjid*/;
+	model lnaval= CANCLASN_ /*/ ddfm=KR*/;
+/*	random intercept/subject=subjid(CANCLASN);*/
+	lsmeans  CANCLASN_/alpha=0.1 cl diff;
+/*	estimate 'Study - Ref'  CANCLASN 1 -1 /cl alpha=0.1;*/
+
+/*		 estimate '1 - 2' CANCLASN_ 1 -1 0 0 ;*/
+/*	 	 estimate '1 - 3' CANCLASN_ 1 0 -1 0 ;*/
+/*	     estimate '1 - 4' CANCLASN_ 1 0 0 -1 ;*/
+/*	     estimate '2 - 3' CANCLASN_ 0 1 -1 0 ;*/
+/*	     estimate '2 - 4' CANCLASN_ 0 1 0 -1 ;*/
+/*	     estimate '3 - 4' CANCLASN_ 0 0 1 -1 ;*/
+run;
+
+ods output ModelANOVA=ModelANOVA;
+proc anova data=pprac ;
+	class CANCLASN_;
+	model lnaval=CANCLASN_;
+	by paramcd param;
+run;
+/*ods trace off;*/
+
+**-----最小二乘均值（标准差）-----**;
+data ls1;
+	set ls;
+	lsmean=estimate;
+	keep paramcd CANCLASN_ lsmean stderr ;
+run;
+
+proc sort data=ls1;
+	by paramcd CANCLASN_;
+run;
+**merge with std**;
+data ls2;
+	length col3 $200;
+	set ls1;
+	if stderr ne . then col3=strip(put(lsmean,20.4))||' ('||strip(put(stderr,20.4))||')';
+	else if stderr=. then col3=strip(put(lsmean,20.4))||' (-)';
+	keep paramcd CANCLASN_ col3;
+run;
+
+/*统计量*/
+data stat;
+	length col4 col5 $200;
+	set ModelANOVA;
+	col4=strip(put(FValue,20.4)) ;
+	col5=strip(put(ProbF,20.4)) ;
+run;
