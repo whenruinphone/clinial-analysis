@@ -2,9 +2,109 @@
 	ods listing;
 /*	ods trace on/listing;*/
 	proc npar1way data=d1(where=(sort in (1 4 5 6))) wilcoxon ;
-		class  trtseq&y.n;
+		class  trtseqpn;
 		by sort group;
 		var aval;
 		ods output WilcoxonTest=wil ;
 	run;
 /*	ods trace off;*/
+
+data wil1;
+		set wil;
+		if name1 in ('Z_WIL' 'P2_WIL' );
+	run;
+
+	proc sort data=wil1;
+		by sort group ;
+	run;
+
+	proc transpose data=wil1 out=wil2;
+		by sort group ;
+		id name1;
+		var nvalue1;
+	run;
+
+	data wil3;
+		length svalue pvalue $200;
+		set wil2;
+		by sort group ;
+		if not missing(Z_WIL) then Svalue=strip(put(round(Z_WIL,0.01),12.2));
+		if not missing(p2_wil) then do;
+			if round(p2_wil,0.0001)<0.0001 then pvalue='<.0001';
+			else if round(p2_wil,0.0001)>=0.0001 then pvalue=strip(put(round(p2_wil,0.0001),12.4));
+		end;
+		keep sort group svalue pvalue;
+	run;
+**********************************end of wilcoxon*****************;
+
+**性别和民族、种族的P值来源于Fisher精确检验;
+	proc freq data=d1(where=(sort in (2 3)));
+		tables sort*group*trtseqpn*aval/out=freq1;
+		table sort*group*trtseqpn/out=freq2;
+	run;
+	
+	proc sort data=freq1 out=base(keep=sort group)nodupkey;
+		by sort group;
+	run;
+	data base1;
+		set base;
+		do trtseqpn=1,2;
+			do aval=1,2;
+				output;
+			end;
+		end;
+	run;
+	data base2;
+		set base;
+		do trtseqpn=1,2;
+				output;
+		end;
+	run;
+	proc sort data=freq1; by sort group trtseqpn aval; run;
+	proc sort data=base1; by sort group trtseqpn aval; run;
+	data freq1_1;
+		merge base1 freq1;
+		by  sort group trtseqpn aval;
+		if missing(count) then count=0;
+		if aval=1 then val='Y';
+		if aval=2 then val='N';
+	run;
+	
+	proc freq data=FREQ1_1;
+		by sort group;
+		tables trtseqpn*val/ fisher expected norow nocol nopercent;
+		weight count;
+		ods output FishersExact=fisher;
+	run;
+/*	ods trace off;*/
+
+	data s2;
+		length pvalue $200;
+		set fisher;
+		if label1='Two-sided Pr <= P' ;
+		if not missing(nvalue1) then do;
+			if round(nvalue1,0.0001)<0.0001 then pvalue='<.0001';
+			else if round(nvalue1,0.0001)>=0.0001 then pvalue=strip(put(round(nvalue1,0.0001),12.4));
+		end;
+		keep sort group  pvalue;
+	run;
+
+	proc sort data=d1 out=base(keep=sort group)nodupkey;
+		by sort group;
+	run;
+	
+	data s3;
+		set wil3(in=a) s2(in=b);
+	run;
+	proc sort data=s3; by sort group; run;
+	data tdata.&out;
+		merge s3 base;
+		by sort group;
+		if missing(svalue) then svalue='-';
+		if missing(pvalue) then pvalue='-';
+	run;
+%end;
+
+
+
+
