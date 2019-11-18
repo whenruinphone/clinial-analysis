@@ -1,0 +1,10 @@
+*年龄、身高、体重、体重指数的统计量和P值来源于Wilcoxon秩和检验;
+	ods listing;
+/*	ods trace on/listing;*/
+	proc npar1way data=d1(where=(sort in (1 4 5 6))) wilcoxon ;
+		class  trtseq&y.n;
+		by sort group;
+		var aval;
+		ods output WilcoxonTest=wil ;
+	run;
+/*	ods trace off;*/
