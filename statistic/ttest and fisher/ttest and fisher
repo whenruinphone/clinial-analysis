@@ -1,0 +1,894 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: i_test.sas,v $
+REV/REV        : $Revision: 1036 $
+AUTH           : $Author: yang_yang $
+REV DATE       : $Date: 2019-12-04 14:52:05 +0800 (Wed, 04 Dec 2019) $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : TGS/HTGSCNON0222
+PURPOSE        :
+INPUT FILES    :
+OUTPUT FILES   :
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+
+options source source2 mprint noquotelenmax;
+
+%macro i_test(out=,y=);
+    *T检验;
+    %macro ttest(data=,ord=,byvar1=,byvar2=);
+        proc sort data=&data.(where=(trt&y.n^=. and kind=1)) out=s1;
+        	by &byvar1 sort group &byvar2 trt&y.n;
+        run;
+		ods graphics off;
+    	proc ttest data=s1;
+    		by &byvar1 sort group &byvar2;
+    		class trt&y.n;
+    		var aval;
+            ods output ttests=ttest Equality=Equality;
+    	run;
+
+    	ods output close;
+		ods graphics on;
+
+    	proc sort data=ttest;
+    		by &byvar1 sort group &byvar2;
+    	run;
+    	proc sort data=Equality;
+    		by &byvar1 sort group &byvar2;
+    	run;
+
+    	data s1_;
+    		merge ttest equality(rename=(Method=Method_));
+    		by &byvar1 sort group &byvar2;
+    	run;
+
+    	data test0;
+    		set s1_(rename=(tvalue=value probt=robt));
+    		if probf>0.05 then do;
+    			if method='Pooled' then output;
+    		end;
+    		else if  probf<=0.05 then do;
+    			if method='Satterthwaite' then output;
+    		end;
+    		keep &byvar1 &byvar2 sort group value robt;
+    	run;
+
+        %if %index(&out,st_14_3_2) %then %do;
+        data test0&ord;
+            set test0;
+            ord=&ord.;
+        run;
+        %end;
+    %mend;
+***************************T test end**************************************;
+
+	*卡方或Fisher精确检验;
+	%macro chisq(data=,sort=,i=,ord=0, BYVAR1=);
+    	proc sort data=&data.(where=(kind=2 and sort=&sort)) out=s2&sort ;
+    		by &BYVAR1 sort group trt&y.n;
+    	run;
+
+    	proc sql noprint;
+    		select count(distinct aval) into :level from s2&sort ;
+    		select count(distinct trt&y.n) into :treat from s2&sort ;
+    	quit;
+
+    	%put &level &treat;
+
+        %if &level>=2 and &treat>=2 %then %do;
+            ods graphics off;
+       	    ods listing close;
+        	ods output chisq=chisq&sort CrossTabFreqs=Crossxx&sort;
+
+        	proc freq data=s2&sort(where=(sort=&sort)) ;
+        		by &BYVAR1 sort group;
+        		table trt&y.n*aval/chisq expected;
+        	run;
+            ods graphics on;
+
+        	ods listing;
+        	proc sql noprint;
+        		select min(Expected) into :countt from Crossxx&sort where Expected ne .;
+        	quit;
+
+    	   %put &countt;
+
+        	%if %sysevalf(&countt>=5) %then %do;
+        		data test&sort;
+        			set chisq&sort(rename=(prob=robt));
+        			if Statistic='Chi-Square' then output;
+        			keep &BYVAR1 sort group value robt;
+        		run;
+        	%end;
+
+        	%else %do;
+	            ods graphics off;
+
+                ods output chisq=chisq&sort FishersExact=Fisher&sort CrossTabFreqs=Cross&sort;
+
+                proc freq data=s2&sort(where=(sort=&sort)) ;
+                	by &BYVAR1 sort group;
+                	table trt&y.n*aval/fisher;
+                run;
+
+        		data test&sort(keep=&BYVAR1 sort group value robt);
+        			set Fisher&sort;
+        			if Name1='XP2_FISH' then do;
+        				robt=nvalue1;
+        				value=.;
+        				output;
+        			end;
+        		run;
+	            ods graphics ON;
+
+        	%end;
+        %end;
+
+        %if &level<2 or &treat<2 %then %do;
+            proc sort data=s2&sort out=temp nodupkey;
+            	by &BYVAR1 sort group;
+            run;
+
+            data test&sort;
+            	set temp ;
+            	value=.;
+            	robt=.;
+            	keep &BYVAR1 sort group value robt;
+            run;
+        %end;
+        %if %index(&out,st_14_3_2) %then %do;
+        data test&sort&ord;
+            set test&sort;
+            ord=&ord.;
+        run;
+        %end;
+        %if %index(&out,st_14_3_3_1) %then %do;
+        data test&i&sort&ord;
+            set test&sort;
+            ord=&ord.;
+            aperiod=&i;
+        run;
+        %end;
+	%mend;
+***************************chisq end**************************************;
+
+**表14.1.5  人口统计学和其他基线特征总结 – 全分析集;
+%if %index(&out,st_14_1_5) %then %do;
+	*Fetch the source data;
+	data demog;
+		length group $200;
+		set derived.adsl(where=(fasfl='是'));
+
+		/**T检验模板**/
+		kind=1;
+		group='年龄（岁）'; sort=1; 	   aval=age;	output;
+		group='身高（cm）'; sort=5; 	aval=heightbl;	output;
+        group='体重（kg）'; sort=6; 	aval=weightbl;	output;
+        group='体重指数（kg/m2）'; sort=7; 	aval=bmibl;	output;
+        group='体表面积（m2）'; sort=8; 	aval=bsabl;	output;
+
+		/**P值来源于卡方检验或Fisher精确检验**/
+		kind=2;
+		group='年龄组别[n(%)]'; sort=2;	aval=agegr1n; 	output;
+		group='性别[n(%)]'; sort=3;	aval=sexn;  output;
+		group='民族[n(%)]'; sort=4;	aval=ethnicn;	output;
+		group='ECOG[n(%)]'; sort=9; 	aval=ecogstat; 	output;
+        group='EGFR状态'; sort=10; 	aval=egfrn; 	output;
+        group='有无脑转移'; sort=11;   aval=rmbfn; 	output;
+	run;
+  
+    **T检验;
+    %ttest(data=demog);
+
+    **卡方检验;
+    %chisq(data=demog,sort=2);
+    %chisq(data=demog,sort=3);
+    %chisq(data=demog,sort=4);
+    %chisq(data=demog,sort=9);
+    %chisq(data=demog,sort=10);
+    %chisq(data=demog,sort=11);
+    
+	data test;
+		set test0 test2-test4 test9-test11;
+	run;
+
+    proc sort data=test;
+        by sort group;
+    run;
+
+    data tdata.&out;
+    	length  svalue pvalue $200;
+    	set test;
+        if value=. then svalue='-';
+    	else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+        else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+        else pvalue= strip(put(round(robt,0.0001),12.4));
+    	keep sort group svalue  pvalue;
+	run;
+%end;
+
+
+**表14.1.6  吸烟史总结 – 全分析集;
+%if %index(&out,st_14_1_6) %then %do;
+	data sub;
+		length group $200;
+		set derived.ADSL(in=a where=(fasfl='是' & aval in (1 2 3)) rename=(sustatn=aval))
+            derived.adsl(in=b where=(fasfl='是') rename=(smodur=aval))
+            derived.adsl(in=c where=(fasfl='是') rename=(smodstxt=aval));
+
+		if a then do;
+            kind=2;
+			group='吸烟史';
+			sort=1;
+		end;
+		if b then do;
+            kind=1;
+			group='吸烟时长';
+			sort=2;
+		end;
+		if c then do;
+            kind=1;
+			group='平均每天吸烟支数';
+			sort=3;
+		end;
+	run;
+
+	**吸烟时长、平均每天吸烟支数的统计量和P值来源于t检验;		
+	%ttest(data=sub);
+    **吸烟史的统计量和P值来源于卡方检验或Fisher精确检验;
+    %chisq(data=sub,sort=1);
+
+    data test;
+        set test0 test1;
+    run;
+
+    proc sort data=test;
+        by sort group;
+    run;
+
+    data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep sort group svalue  pvalue;
+	run;
+%end;
+
+
+**表14.1.9 肿瘤原发病史总结 –全分析集;
+%if %index(&out,st_14_1_9) %then %do;
+
+	*Fetch the source data;
+	data canmh;
+		length group $200;
+		set derived.admd(where=(fasfl='是' and mdterm ne ''));
+
+		/**从确诊日期到随机日期的时间间隔（月） T检验模板**/
+		kind=1;
+		group='从确诊日期到随机日期的时间间隔（月）'; sort=1; 	aval=amy;		output;
+		
+		/** 病程阶段、转移部位、诊断方法、组织类型、分化程度、恶性胸腔积液、TNM分期 (T期)、TNM分期 (N期)、TNM分期 (M期)、
+        临床分期、是否为复发的统计量和P值来源于卡方检验或Fisher精确检验**/
+		kind=2;
+		group='病程阶段'; sort=2;	aval=mdclln; 	output;
+		group='诊断方法'; sort=4;	aval=mddiagmn;  output;
+		group='组织类型'; sort=5;	aval=mdttypen;	output;
+		group='分化程度'; sort=6; 	aval=mddiflen; 	output;
+        group='恶性胸腔积液'; sort=7; 	aval=mdmpen; 	output;
+        group='TNM分期 (T期)'; sort=8;   aval=tnmtn; 	output;
+        group='TNM分期 (N期)'; sort=9;  aval=tnmnn;  output;
+        group='TNM分期 (M期)'; sort=10; aval=tnmmn;  output;
+        group='临床分期'; sort=11; aval=mdclsn;  output;
+        group='是否为复发'; sort=12; aval=mdrestsn;  output;
+	run;
+  
+    **T检验;
+    %ttest(data=canmh);
+
+    **卡方检验;
+    %chisq(data=canmh,sort=2);
+    %chisq(data=canmh,sort=4);
+    %chisq(data=canmh,sort=5);
+    %chisq(data=canmh,sort=6);
+    %chisq(data=canmh,sort=7);
+    %chisq(data=canmh,sort=8);
+    %chisq(data=canmh,sort=9);
+    %chisq(data=canmh,sort=10);
+    %chisq(data=canmh,sort=11);
+    %chisq(data=canmh,sort=12);
+
+	data test;
+		set test0 test2 test4-test12;
+	run;
+
+    proc sort data=test;
+        by sort group;
+    run;
+
+   data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep sort group svalue  pvalue;
+	run;
+%end;
+**表14.1.12  基因检测结果总结–全分析集;
+%if %index(&out,st_14_1_12) %then %do;
+	*Fetch the source data;
+	data gene;
+		length group $200;
+		set derived.adlb(where=(fasfl='是' & paramcd in ('ALK','ROS1') & lbstat^='未做'));
+        if lborres='阴性' then aval=1;
+        if lborres='阳性' then aval=2;
+        if lborres='未知' then aval=3;
+
+        if lbmethod='荧光原位杂交（FISH）' then lbmn=1;
+        if lbmethod='免疫组织化学法（IHC）' then lbmn=2;
+        if lbmethod='PCR反应' then lbmn=3;
+        if find(lbmethod,'其他方法') then lbmn=4;
+
+		/**P值来源于卡方检验或Fisher精确检验**/
+		kind=2;
+		if paramcd='ALK' then do; 
+        group='ALK融合基因状态'; sort=1;	aval=aval; 	output;
+		group='检测方法'; sort=2;	aval=lbmn;      output;
+        end;
+        if paramcd='ROS1' then do;
+		group='ROS1融合基因状态'; sort=3;	aval=aval;	output;
+		group='检测方法'; sort=4;  aval=lbmn;       output;
+        end;
+	run;
+ 
+    **卡方检验;
+	%mnumobs(data=gene);
+
+    %chisq(data=gene,sort=1);
+    %chisq(data=gene,sort=2);
+    %chisq(data=gene,sort=3);
+    %chisq(data=gene,sort=4);
+  
+	data test;
+		set test1-test4;
+	run;
+
+    proc sort data=test;
+        by sort group;
+    run;
+
+    data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep sort group svalue  pvalue;
+	run;
+%end;
+
+**表14.2.1  筛选期靶向病灶总结 –全分析集;
+%if %index(&out,st_14_2_1) %then %do;
+	*Fetch the source data;
+	data tr;
+        set derived.adtr(where=(fasfl='是' & param in ('靶病灶总数','靶病灶总径') and trcyc='基线'));
+        if param='靶病灶总数' then do;
+            if aval=1 then trnum=1;
+            if 2<=aval<=3 then trnum=2;
+            if aval>3 then trnum=3;
+			if aval=0 then trnum=0;
+        end;
+	run;
+
+	data tr1;		length group $200;
+
+		set tr;
+    	/**kind=1 T检验模板,kind=2 卡方模板**/
+        if param='靶病灶总数' then do;
+            kind=1;
+            group='靶病灶总数'; sort=2; 	aval=aval;	output;
+        end;
+        if param='靶病灶总径' & trcyc='基线' then do;
+            kind=1;
+        	group='靶病灶总径 (mm)'; sort=3;	aval=aval; 	output;
+    	end;
+	run;
+	data tr2;
+		set tr;		length group $200;
+
+        if param='靶病灶总数' then do;
+		    kind=2;
+            group='靶病灶数量'; sort=1; 	aval=trnum;	output;
+		end;
+	run;
+  
+    **T检验;
+    %ttest(data=tr1, byvar1=TREVAL);
+
+    **卡方检验;
+    %chisq(data=tr2,sort=1, byvar1=TREVAL);
+
+	data test;
+		set test0 test1 ;
+	run;
+
+    proc sort data=test;
+        by TREVAL sort group;
+    run;
+
+    data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep TREVAL sort group svalue  pvalue;
+	run;
+%end;
+
+**表14.2.2  筛选期非靶向病灶总结 –全分析集;
+%if %index(&out,st_14_2_2) %then %do;
+	*Fetch the source data;
+	data tr;
+        set derived.adtr(where=(fasfl='是' & param in ('非靶病灶总数','非靶病灶检查结果') & trcyc="基线"));
+		by usubjid treval paramn;
+        if param='非靶病灶总数' then do;
+            if aval=1 then trnum=1;
+            if 2<=aval<=3 then trnum=2;
+            if aval>3 then trnum=3;
+			if aval=0 then trnum=0;
+			output;
+        end;
+
+		if param="非靶病灶检查结果" and aval ne . then do;
+			if first.paramn then do;
+				**非靶病灶检查结果每个病灶都有一条记录;
+				aval=1;		
+				output;
+			end;	
+		end;
+		*无非靶病灶;
+		if param="非靶病灶总数" and aval=0 then do;
+			paramn=4;
+			param="非靶病灶检查结果";
+			aval=2;
+			output;
+		end;
+
+	run;
+
+	data tr1;
+		length group $200;
+		set tr;
+        /**kind=1 T检验模板,kind=2 卡方模板**/
+        if param='非靶病灶总数' then do;
+            kind=1; 
+            group='非靶病灶总数'; sort=2; 	aval=aval;	output;
+        end;
+	run;
+
+	data tr2;
+		length group $200;
+		set tr;
+ 
+        if param='非靶病灶总数' then do;
+		   kind=2; 
+            group='非靶病灶数量'; sort=1; 	aval=trnum;	output;
+		end;
+        if param='非靶病灶检查结果' & trcyc='基线'  then do;
+            kind=2;
+        	group='非靶病灶检查结果'; sort=3; aval=aval; output;
+    	end;
+	run;
+  
+    **T检验;
+    %ttest(data=tr1, byvar1=TREVAL);
+
+    **卡方检验;
+    %chisq(data=tr2,sort=1, byvar1=TREVAL);
+    %chisq(data=tr2,sort=3, byvar1=TREVAL);
+
+	data test;
+		set test0 test1 test3;
+	run;
+
+    proc sort data=test;
+        by TREVAL sort group;
+    run;
+
+    data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep TREVAL sort group svalue  pvalue;
+	run;
+%end;
+
+**表14.3.2  药物暴露总结 – 安全性集;
+%if %index(&out,st_14_3_2) %then %do;
+	data adsl;
+		length group $200;
+		set derived.adsl;
+		where saffl="是";
+		avalca2n=0;
+		kind=2;
+		parcat1n=1;
+		group='延迟用药次数';
+		sort=4;
+		if trt01an ne . then do;
+			aperiod=1;
+			trtan=trt01an;
+			output;
+		end;
+		if trt02an ne . then do;
+			aperiod=2;
+			trtan=trt02an;
+			output;
+		end;
+		if trt03an ne . then do;
+			aperiod=2;
+			trtan=trt03an;
+			output;
+		end;
+
+		if trt01an=1 or trt02an=1 or trt03an=1 then do;
+			aperiod=3;
+			trtan=1;
+			output;
+		end;
+		if trt01an=2 or trt02an=2 or trt03an=2 then do;
+			aperiod=3;
+			trtan=2;
+			output;
+		end;		 
+	run;
+
+	proc sort data=adsl nodupkey;
+		by usubjid trtan aperiod;
+	run;
+
+	*Fetch the source data;
+     %do i=1 %to 3;
+        %let j=1;
+        data ex&i&j;
+            length group $200;
+            set derived.adexsum(where=(saffl='是' & paramn in (3,4,7,10) & aperiod=&i. & parcat1n=&j.));
+             /**kind=1 T检验模板,kind=2 卡方模板**/
+            if param='治疗持续时间(周)' then  do;
+                kind=1; 
+                group='非靶病灶总数'; sort=1; 
+            end;
+            if param='实际注射总剂量 (mg)' then do;
+                kind=1;
+                group='实际注射总剂量 (mg)'; sort=2;
+            end;
+            if param='实际注射总次数' then do;
+                kind=1;
+                group='实际注射总次数';  sort=3;
+            end;
+            if param='延迟用药次数' then do;
+                kind=2;
+                group='延迟用药次数'; sort=4;
+            end;
+            %if &j=1 %then %do;
+            if param='剂量调整的次数' then delete;
+            %end;
+        run;
+
+		proc sort data=ex&i&j;
+			by usubjid trtan aperiod;
+		run;
+
+		data exx&i&j;
+			merge adsl(where=(aperiod=&i. & parcat1n=&j.)) ex&i&j(where=(paramn in (10)));
+			by usubjid trtan;
+
+			  aval=avalca2n; 
+
+			keep usubjid trta: parcat: aperio: group sort aval: kind;
+		run;
+
+        **T检验;
+        %ttest(data=ex&i&j,ord=&i&j);
+        **卡方检验;
+        %chisq(data=exx&i&j,sort=4,ord=&i&j);
+/*        %chisq(data=ex&i&j,sort=5,ord=&i&j);*/
+    %end;
+
+	data test;
+		set test011 test021 test031 test411 test421 test431;
+        aperiod=input(substr(strip(put(ord,best.)),1,1),??best.);
+        parcat1n=input(substr(strip(put(ord,best.)),2,1),??best.);
+	run;
+
+    proc sort data=test;
+        by aperiod parcat1n sort group;
+    run;
+
+    data tdata.&out;
+		length  svalue pvalue $200;
+		set test;
+        if value=. then svalue='-';
+		else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+    	else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+    	else pvalue= strip(put(round(robt,0.0001),12.4));
+		keep aperiod parcat1n sort group svalue pvalue;
+	run;
+%end;
+
+**表14.3.3.1  不良事件总结 – 安全性集（联合治疗期） ;
+%if %index(&out,st_14_3_3_1) %then %do;
+   data adsl;
+        set derived.adsl(where=(saffl='是'));
+        if trt01an ne . then do;
+            trtan=trt01an;
+            aperiod=1;
+            output;
+        end;
+        if trt02an=1 or trt03an=1 then do;
+            trtan=1;
+            aperiod=2;
+            output;
+        end;
+        if trt02an=2 or trt03an=2 then do;
+            trtan=2;
+            aperiod=2;
+            output;
+        end;
+    run;
+
+    data adsl1;
+        set adsl;
+        output;
+        aperiod=0;
+        output;
+    run;
+    
+    proc sort data=adsl1 out=adsl2(keep=usubjid aperiod trtan) nodupkey;
+        by usubjid aperiod trtan;
+    run;
+
+    data adae;
+        set derived.adae(where=(saffl='是' & trtan ne . & aperiod ne .));
+        output;
+        aperiod=0;
+        output;
+    run;
+
+    /*fetch data from derived.adae*/
+    %macro ae(i=,sort=,group=,ord=0, where=);
+        %do i=0 %to 2;
+    	proc sort data=adae(where=(aperiod=&i & &where.)) out=adae_1 nodupkey;
+    		by usubjid trtan;
+    	run;
+
+        proc sort data=adsl2(where=(aperiod=&i)) out=adsl_1;
+    		by usubjid trtan;
+    	run;
+
+    	data ae&i&sort&ord;
+            length group $200;
+    		merge adsl_1(in=a)
+    			  adae_1(in=b);
+    		by usubjid trtan;
+    		if a;
+            kind=2;
+            sort=&sort;
+            group=&group;
+            ord=&ord;
+    		if &where. then aval=1;
+    		else aval=2;
+    	run; 
+        %end; 
+    %mend;
+    
+    **求p值,来源于卡方检验或者Fisher精确检验;
+    %ae(sort=1,group='所有不良事件（AE）',where=%str(aeterm^=''));
+    %ae(sort=2,group='所有治疗期不良事件（TEAE）',where=%str(trtemfl='是'));
+    %ae(sort=3,group='与MIL60/贝伐珠单抗相关的TEAE',where=%str(relgr1='相关' & trtemfl='是'));
+    %ae(sort=4,group='与紫杉醇/卡铂相关的TEAE',where=%str(relgr2='相关' & trtemfl='是'));
+    %ae(sort=5,group='三级及三级以上TEAE',where=%str(aesevn>=3 & trtemfl='是'));
+    %ae(sort=6,group='三级及三级以上与MIL60/贝伐珠单抗相关的TEAE',where=%str(aesevn>=3 & relgr1='相关'  & trtemfl='是'));
+    %ae(sort=7,group='三级及三级以上与紫杉醇/卡铂相关的TEAE',where=%str(aesevn>=3 & relgr2='相关' & trtemfl='是'));
+    %ae(sort=8,group='输注相关的TEAE',where=%str(AEIRR='是' & trtemfl='是'));
+    %ae(sort=9,group='严重不良事件（SAE）',where=%str(aeser='是'));
+    %ae(sort=9,group='导致死亡',ord=1,where=%str(aeser='是' & aesdth='是'));
+    %ae(sort=9,group='危及生命',ord=2,where=%str(aeser='是' & aeslife='是'));
+    %ae(sort=9,group='需要住院或延长住院时间',ord=3,where=%str(aeser='是' & aeshosp='是'));
+    %ae(sort=9,group='导致永久或严重的残疾/能力丧失',ord=4,where=%str(aeser='是' & aesdisab='是'));
+    %ae(sort=9,group='导致先天性异常/出生缺陷',ord=5,where=%str(aeser='是' & aescong='是'));
+    %ae(sort=9,group='其他重要医学事件',ord=6,where=%str(aeser='是' & aesmie='是'));
+    %ae(sort=10,group='与MIL60/贝伐珠单抗相关的SAE',where=%str(relgr1='相关'  & aeser='是'));
+    %ae(sort=11,group='与紫杉醇/卡铂相关的SAE',where=%str(relgr2='相关' & aeser='是'));
+    %ae(sort=12,group='导致死亡TEAE',where=%str(aesdth='是' & trtemfl='是'));
+    %ae(sort=13,group='导致研究中止的TEAE',where=%str(aedis='是' & trtemfl='是'));
+    %ae(sort=14,group='导致研究中止与MIL60/贝伐珠单抗相关TEAE',where=%str(aedis='是' & relgr1='相关' & trtemfl='是'));
+    %ae(sort=15,group='导致研究中止与紫杉醇/卡铂相关TEAE',where=%str(aedis='是' & relgr2='相关' & trtemfl='是'));
+    %ae(sort=16,group='导致MIL60/贝伐珠单抗减少剂量的TEAE',where=%str(aeacnn=2 & trtemfl='是'));
+    %ae(sort=17,group='导致紫杉醇/卡铂减少剂量的TEAE',where=%str((aeacn1n=2 or aeacn2n=2) & trtemfl='是'));
+    %ae(sort=18,group='导致MIL60/贝伐珠单抗暂停用药的TEAE',where=%str(aeacnn=3 & trtemfl='是'));
+    %ae(sort=19,group='导致紫杉醇/卡铂暂停用药的TEAE',where=%str((aeacn1n=3 or aeacn2n=3) & trtemfl='是'));
+    %ae(sort=20,group='导致MIL60/贝伐珠单抗永久停药的TEAE',where=%str(aeacnn=4 & trtemfl='是'));
+    %ae(sort=21,group='导致紫杉醇/卡铂永久停药的TEAE',where=%str((aeacn1n=4 or aeacn2n=4) & trtemfl='是'));
+    %ae(sort=22,group='特别关注不良事件（AESI）',where=%str(aesi='是' & trtemfl='是'));
+    %ae(sort=23,group='重要不良事件',where=%str(aeimp='是' & trtemfl='是'));
+    %ae(sort=24,group='与MIL60/贝伐珠单抗相关的重要不良事件',where=%str(aeimp='是' & relgr1='相关' & trtemfl='是'));
+    %ae(sort=25,group='与紫杉醇/卡铂相关的重要不良事件',where=%str(aeimp='是' & relgr2='相关' & trtemfl='是'));
+
+    **卡方检验;
+    **aperiod=0;
+    %chisq(data=ae010,sort=1,i=0);
+    %chisq(data=ae020,sort=2,i=0);
+    %chisq(data=ae030,sort=3,i=0);
+    %chisq(data=ae040,sort=4,i=0);
+    %chisq(data=ae050,sort=5,i=0);
+    %chisq(data=ae060,sort=6,i=0);
+    %chisq(data=ae070,sort=7,i=0);
+    %chisq(data=ae080,sort=8,i=0);
+    %chisq(data=ae090,sort=9,i=0);
+    %chisq(data=ae091,sort=9,ord=1,i=0);
+    %chisq(data=ae092,sort=9,ord=2,i=0);
+    %chisq(data=ae093,sort=9,ord=3,i=0);
+    %chisq(data=ae094,sort=9,ord=4,i=0);
+    %chisq(data=ae095,sort=9,ord=5,i=0);
+    %chisq(data=ae096,sort=9,ord=6,i=0);
+    %chisq(data=ae0100,sort=10,i=0);
+    %chisq(data=ae0110,sort=11,i=0);
+    %chisq(data=ae0120,sort=12,i=0);
+    %chisq(data=ae0130,sort=13,i=0);
+    %chisq(data=ae0140,sort=14,i=0);
+    %chisq(data=ae0150,sort=15,i=0);
+    %chisq(data=ae0160,sort=16,i=0);
+    %chisq(data=ae0170,sort=17,i=0);
+    %chisq(data=ae0180,sort=18,i=0);
+    %chisq(data=ae0190,sort=19,i=0);
+    %chisq(data=ae0200,sort=20,i=0);
+    %chisq(data=ae0210,sort=21,i=0);
+    %chisq(data=ae0220,sort=22,i=0);
+    %chisq(data=ae0230,sort=23,i=0);
+    %chisq(data=ae0240,sort=24,i=0);
+    %chisq(data=ae0250,sort=25,i=0);
+    **aperiod=1;
+    %chisq(data=ae110,sort=1,i=1);
+    %chisq(data=ae120,sort=2,i=1);
+    %chisq(data=ae130,sort=3,i=1);
+    %chisq(data=ae140,sort=4,i=1);
+    %chisq(data=ae150,sort=5,i=1);
+    %chisq(data=ae160,sort=6,i=1);
+    %chisq(data=ae170,sort=7,i=1);
+    %chisq(data=ae180,sort=8,i=1);
+    %chisq(data=ae190,sort=9,i=1);
+    %chisq(data=ae191,sort=9,ord=1,i=1);
+    %chisq(data=ae192,sort=9,ord=2,i=1);
+    %chisq(data=ae193,sort=9,ord=3,i=1);
+    %chisq(data=ae194,sort=9,ord=4,i=1);
+    %chisq(data=ae195,sort=9,ord=5,i=1);
+    %chisq(data=ae196,sort=9,ord=6,i=1);
+    %chisq(data=ae1100,sort=10,i=1);
+    %chisq(data=ae1110,sort=11,i=1);
+    %chisq(data=ae1120,sort=12,i=1);
+    %chisq(data=ae1130,sort=13,i=1);
+    %chisq(data=ae1140,sort=14,i=1);
+    %chisq(data=ae1150,sort=15,i=1);
+    %chisq(data=ae1160,sort=16,i=1);
+    %chisq(data=ae1170,sort=17,i=1);
+    %chisq(data=ae1180,sort=18,i=1);
+    %chisq(data=ae1190,sort=19,i=1);
+    %chisq(data=ae1200,sort=20,i=1);
+    %chisq(data=ae1210,sort=21,i=1);
+    %chisq(data=ae1220,sort=22,i=1);
+    %chisq(data=ae1230,sort=23,i=1);
+    %chisq(data=ae1240,sort=24,i=1);
+    %chisq(data=ae1250,sort=25,i=1);
+    **aperiod=2;
+    %chisq(data=ae210,sort=1,i=2);
+    %chisq(data=ae220,sort=2,i=2);
+    %chisq(data=ae230,sort=3,i=2);
+    %chisq(data=ae240,sort=4,i=2);
+    %chisq(data=ae250,sort=5,i=2);
+    %chisq(data=ae260,sort=6,i=2);
+    %chisq(data=ae270,sort=7,i=2);
+    %chisq(data=ae280,sort=8,i=2);
+    %chisq(data=ae290,sort=9,i=2);
+    %chisq(data=ae291,sort=9,ord=1,i=2);
+    %chisq(data=ae292,sort=9,ord=2,i=2);
+    %chisq(data=ae293,sort=9,ord=3,i=2);
+    %chisq(data=ae294,sort=9,ord=4,i=2);
+    %chisq(data=ae295,sort=9,ord=5,i=2);
+    %chisq(data=ae296,sort=9,ord=6,i=2);
+    %chisq(data=ae2100,sort=10,i=2);
+    %chisq(data=ae2110,sort=11,i=2);
+    %chisq(data=ae2120,sort=12,i=2);
+    %chisq(data=ae2130,sort=13,i=2);
+    %chisq(data=ae2140,sort=14,i=2);
+    %chisq(data=ae2150,sort=15,i=2);
+    %chisq(data=ae2160,sort=16,i=2);
+    %chisq(data=ae2170,sort=17,i=2);
+    %chisq(data=ae2180,sort=18,i=2);
+    %chisq(data=ae2190,sort=19,i=2);
+    %chisq(data=ae2200,sort=20,i=2);
+    %chisq(data=ae2210,sort=21,i=2);
+    %chisq(data=ae2220,sort=22,i=2);
+    %chisq(data=ae2230,sort=23,i=2);
+    %chisq(data=ae2240,sort=24,i=2);
+    %chisq(data=ae2250,sort=25,i=2);
+
+	data test;
+	    set test010 test020 test030 test040 test050 test060 test070 test080 test090  
+        test091 test092 test093 test094 test095 test096 test0100 test0110 test0120 test0130 
+        test0140 test0150 test0160 test0170 test0180 test0190 test0200 test0210 test0220 
+        test0230 test0240 test0250
+        test110 test120 test130 test140 test150 test160 test170 test180 test190  
+        test191 test192 test193 test194 test195 test196 test1100 test1110 test1120 test1130 
+        test1140 test1150 test1160 test1170 test1180 test1190 test1200 test1210 test1220 
+        test1230 test1240 test1250
+        test210 test220 test230 test240 test250 test260 test270 test280 test290  
+        test291 test292 test293 test294 test295 test296 test2100 test2110 test2120 test2130 
+        test2140 test2150 test2160 test2170 test2180 test2190 test2200 test2210 test2220 
+        test2230 test2240 test2250;
+	run;
+
+    proc sort data=test;
+        by aperiod sort ord group;
+    run;
+
+    data tdata.&out;
+    	length  svalue pvalue $200;
+    	set test;
+        if value=. then svalue='-';
+    	else if value ne . then svalue=strip(put(round(value,0.01),12.2));
+        if robt=. then pvalue='-';
+        else if .<robt<.0001 then pvalue="<.0001";
+        else if robt>0.9999 then pvalue=">.9999";
+        else pvalue= strip(put(round(robt,0.0001),12.4));
+    	keep aperiod group pvalue;
+	run;
+%end;
+
+/***clear up work datasets;*/
+/*%mc_clrup;*/
+%mend;
+
+**表14.1.5  人口统计学和其他基线特征总结 – 全分析集;
+/*%i_test(out=st_14_1_5,y=01p);*/
+/***表14.1.6  吸烟史总结 – 全分析集;*/
+/*%i_test(out=st_14_1_6,y=01p); */
+/***表14.1.9 肿瘤原发病史总结 –全分析集;*/
+/*%i_test(out=st_14_1_9,y=01p); */
+/***表14.1.12  基因检测结果总结–全分析集;*/
+/*%i_test(out=st_14_1_12,y=01p);*/
+/***表14.2.1  筛选期靶向病灶总结 –全分析集;*/
+/*%i_test(out=st_14_2_1,y=01p);*/
+/***表14.2.2  筛选期非靶向病灶总结 –全分析集;*/
+/*%i_test(out=st_14_2_2,y=01p);*/
+/***表14.3.2  药物暴露总结 – 安全性集;*/
+/*%i_test(out=st_14_3_2,y=a);*/
+/***表14.3.3.1  不良事件总结 – 安全性集;*/
+/*%i_test(out=st_14_3_3_1,y=a);*/
