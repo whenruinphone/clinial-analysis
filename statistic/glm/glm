@@ -1,0 +1,322 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_orr12.sas,v $
+REV/REV        : $Revision: 1019 $
+AUTH           : $Author: yang_yang $
+REV DATE       : $Date: 2019-12-03 15:28:16 +0800 (Tue, 03 Dec 2019) $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : TGS/HTGSCNON0222
+PURPOSE        : Create 表14.2.3.1  12周的客观缓解率分析（独立委员会评估）– 全分析集
+						表14.2.3.2  12周的客观缓解率的敏感性分析（独立委员会评估） – 符合方案集
+						表14.2.3.3  12周的客观缓解率的敏感性分析（研究者评估） – 全分析集
+						表14.2.3.4  12周的客观缓解率的敏感性分析（研究者评估） – 符合方案集
+INPUT FILES    : derived.ADRS
+OUTPUT FILES   : t14_2_3_1_orr12-t14_2_3_4_orr12.RTF
+MACROS USED    : %mc_clrup, %mc_gtbtf, %mc_addpn
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+options noquotelenmax;
+
+**clear out work datasets;
+%mc_clrup;
+
+%let progname=t_orr12;
+%let dataset=ADRS;
+%let source=%str();
+
+/*proc printto log="&tablog\&progname..log" new;*/
+/*run;*/
+
+options spool;
+
+%macro tdor(outname=, source=, cond=, flag=, suf=);
+**Fetch data from derived.adrs**;
+data adrs;
+	length avalc $200;
+	set derived.adrs;
+	where trt01pn ne . &cond and param="12周最佳总体疗效"  and &flag="是";
+
+	if avalc in ('完全缓解(CR)', '部分缓解（PR)', '部分缓解(PR)') then orr=1;
+	else orr=2;
+run;
+
+proc sql noprint;
+	select count(*) into :numobs from adrs;
+quit;
+
+%put &numobs;
+
+%if &numobs>0 %then %do;
+data adrs1;
+	set adrs;
+	output;
+
+	**客观缓解 = CR + PR. ;
+	if avalc in ('完全缓解(CR)', '部分缓解（PR)', '部分缓解(PR)') then do;
+		avalc="12周的客观缓解率（ORR^{sub 12}）";
+		aval=6;
+		output;
+	end;
+run;
+
+**Frequency;
+proc sql noprint;
+	create table freqs as select count(distinct usubjid) as count, trt01pn, aval, avalc from adrs1
+		group by aval, avalc, trt01pn;
+quit;
+
+**Template;
+data template;
+	length col1 $200;
+	ord=1;
+	do col1="^w^w完全缓解(CR)", "^w^w部分缓解(PR)", "^w^w疾病稳定(SD)", "^w^w疾病进展(PD)", "^w^w不可评估(NE)", "12周的客观缓解率（ORR^{sub 12}）";
+		sort+1;
+		output;
+	end;
+run;
+
+**a.采用广义线性模型（GLM，模型中包括组别和分层因素）估计两组ORR及其95%置信区间，两组ORR比值及90%置信区间（基于log link function），
+两组ORR差值及90%置信区间（基于identity link function）。分层因素为性别、EGFR基因状态（野生型vs.突变型），和有无脑转移。 
+b.广义线性模型中只包括组别。;
+
+ods graphics off;
+**ods trace on;
+
+**含分层因素*;
+**差值*;
+proc glimmix data=adrs;
+	class trt01pn (ref=last) rmbfn sexn egfrn;
+	model orr=trt01pn rmbfn sexn egfrn/dist=binary link=identity;
+    lsmeans trt01pn/cl ilink alpha=0.05;
+	estimate 'RD for trt 90' trt01pn 1-1/alpha=0.1;
+	ods output  LSmeans=stat_est1
+                Estimates=stat_diff1(where=(label='RD for trt 90'));
+run;
+
+**比值*;
+proc glimmix data=adrs;
+	class trt01pn(ref=last) rmbfn sexn egfrn;
+	model orr=trt01pn rmbfn sexn egfrn/dist=binary link=log;
+	estimate 'RR for trt 90' trt01pn 1-1/exp alpha=0.1;
+	nloptions MAXITER= 700;
+	**estimate 'RR for trt 95' trt01pn 1-1/exp alpha=0.05;
+	ods output Estimates=stat_rate1(where=(label='RR for trt 90')) ;
+run;
+
+
+**不含分层因素*;
+**差值*;
+proc glimmix data=adrs;
+	class trt01pn (ref=last)  ;
+	model orr=trt01pn/dist=binary link=identity;
+    lsmeans trt01pn/cl ilink alpha=0.05;
+	estimate 'RD for trt 90' trt01pn 1-1/alpha=0.1;
+	ods output  LSmeans=stat_est2
+                Estimates=stat_diff2(where=(label='RD for trt 90'));
+run;
+
+**比值*;
+proc glimmix data=adrs;
+	class trt01pn(ref=last) ;
+	model orr=trt01pn /dist=binary link=log;
+	estimate 'RR for trt 90' trt01pn 1-1/exp alpha=0.1;
+	nloptions MAXITER= 700;
+	**estimate 'RR for trt 95' trt01pn 1-1/exp alpha=0.05;
+	ods output Estimates=stat_rate2(where=(label='RR for trt 90')) ;
+run;
+
+ods graphics on;
+**ods trace off;
+
+data stat;
+	length stat $200;
+	set stat_est1(in=a1) stat_rate1(in=b1) stat_diff1(in=c1)
+		stat_est2(in=a2) stat_rate2(in=b2) stat_diff2(in=c2)
+		freqs(in=d);
+
+	if a1 or a2 or c1 or c2 then do;
+		if Estimate ne . then Estimate=Estimate*100;
+		if Lower ne . then Lower=Lower*100;
+		if Upper ne . then Upper=Upper*100;
+	end;
+
+	**百分比;
+	if d then do;
+		ord=1;
+		sort=aval;
+		if trt01pn=1 then dem=&&&suf.popc1;
+		else if trt01pn=2 then dem=&&&suf.popc2;
+		if count=dem>0 then stat=strip(put(count, 5.0))||' (100)';
+		else if count=0 then stat='0';
+		else stat=strip(put(count, 5.0))||' ('||put(count/dem*100, 5.1)||')';
+	end;
+	**估计值与95%置信区间;
+	else if a1 or a2 then do;
+		if a1 then ord=2;
+		else if a2 then ord=3;
+		sort=2;
+		stat=strip(put(Estimate,10.2))||' ('||strip(put(Lower,10.3))||', '||strip(put(Upper,10.3))||')';
+	end;
+	**比值和90%置信区间;
+	else if b1 or b2 then do;
+		trt01pn=1;
+		if b1 then ord=2;
+		else if b2 then ord=3;
+		sort=3;
+		stat=strip(put(expEstimate,10.2))||' ('||strip(put(expLower,10.3))||', '||strip(put(expUpper,10.3))||')';
+	end;
+	**差值和90%置信区间;
+	else if c1 or c2 then do;
+		trt01pn=1;
+		if c1 then ord=2;
+		else if c2 then ord=3;
+		sort=4;
+		if nmiss(lower,upper)=0 then stat=strip(put(Estimate,10.2))||' ('||strip(put(Lower,10.3))||', '||strip(put(Upper,10.3))||')';
+		else if nmiss(lower,upper)=2 then stat=strip(put(Estimate,10.2))||' (-,-)';
+	end;
+run;
+
+**把握度暂不计算;
+proc sort data=stat;
+	by ord sort trt01pn;
+run;
+
+proc transpose data=stat out=stat_t prefix=_;
+	by ord sort;
+	id trt01pn;
+	var stat;
+run;
+
+data all;
+	length col1 col2 col3 col4 $200;
+	merge template stat_t;
+	by ord sort;
+
+	if ord=1 and sort=1 then col1="最佳总体疗效^n"||strip(col1);
+
+	if ord=1 and sort=6 then do;
+		sort=1;
+		ord=2;
+	end;
+	if ord=1 or sort=1 then col2="n (%)";
+	else if ord in (2,3) then do;
+		if sort=2 then do;
+			if ord=2 then col1="^w^w含分层因素^{super a}";
+			else if ord=3 then col1="^w^w不含分层因素^{super b}";
+			col2='估计值与95%置信区间';
+		end;
+		else if sort=3 then col2='比值和90%置信区间';
+		else if sort=4 then col2='差值和90%置信区间';
+	end;
+
+	array _(2) _1 _2;
+	array col(2) col3 col4;
+	do j=1 to 2;
+		col[j]=strip(_[j]);
+		if col2="n (%)" then do;
+			if _[j]='' then col[j]='0';
+			col[j]="^R'\qj\tqdec\tx1200 '"||strip(col[j]);
+		end;
+		else do;
+			if col[j] ne '' then col[j]="^R'\qj\tqdec\tx825 '"||strip(col[j]);
+		end; 
+	end;
+
+	grp=ord;
+run;
+
+proc sort data=all;
+	by grp ord sort;
+run;
+%end;
+%else %do;
+data all;
+	length col1-col4 $200 grp ord sort 8;
+	call missing(of _all_);
+run;
+%end;
+
+data tdata.&outname;
+	set all;
+	col1=compress(col1);
+	col2=compress(col2);
+	col3=compress(tranwrd(tranwrd(col3, "^R'\qj\tqdec\tx1200 '", " "), "^R'\qj\tqdec\tx825 '", ""));
+	col4=compress(tranwrd(tranwrd(col4, "^R'\qj\tqdec\tx1200 '", " "), "^R'\qj\tqdec\tx825 '", ""));
+	keep col:;
+run;
+
+
+**generate final rtf file**;
+ods listing close;
+ods rtf file = "&pathtab.\&outname..rtf" style = rptstyle;
+
+%mc_gtbtf(titledset=derived.ddtitles, name=&outname.); 
+%mc_addpn(data=all, by=grp ord sort, line=24); 
+
+proc report data=all nowindows missing split = "#" headline style(report)={cellwidth=100%};
+	column page pagetxt grp ord sort col1 col2 col3 col4;
+	
+	define	page	/order order=internal noprint;
+	define	pagetxt	/order=internal noprint;** left f=$150.;**;
+	define  grp		/order order=internal noprint;
+	define  ord		/order order=internal noprint;
+	define  sort	/order order=internal noprint;
+	define	col1 	/display  	style(column)={just=l vjust=b  cellwidth=24% }
+								style(header)={just=c vjust=b}	"";
+	define	col2    /display  	style(column)={just=l vjust=b  cellwidth=15%}
+								style(header)={just=l vjust=b}	"统计参数";
+	define	col3    /display  	style(column)={just=c vjust=b  cellwidth=15%}
+								style(header)={just=c vjust=b}	"MIL60组#(N=&&&suf.popc1)";
+	define 	col4	/display	style(column)={just=c vjust=b  cellwidth=15%}
+								style(header)={just=c vjust=b}	"贝伐珠单抗组#(N=&&&suf.popc2)";
+ 
+
+	compute before grp;
+		%if &numobs=0 %then %do;
+	        line ' ';
+	        line '未报告相关数据';
+		%end;
+		%else %do;
+	 		line '' ;
+		%end;
+    endcomp;
+
+    compute after page;
+ 		line '' ;
+    endcomp;
+
+    break after page /page;
+	%mc_adtf(adftxt=%str(pagetxt $200.),blank=no,gap=yes);
+run;
+
+ods rtf close; 
+ods listing; 
+ 
+proc compare base=tdata.&outname. compare=tdataqc.qc_&outname. listall outbase outdiff outnoeq outcomp out=c_data;
+run; 
+	
+%mend;
+
+
+*表14.2.3.1  12周的客观缓解率分析（独立委员会评估）– 全分析集;
+%tdor(outname=t14_2_3_1_orr12, source=%str(清单16.2.4.2), cond=and parcat1="独立委员会评估", flag=fasfl, suf=fas);
+
+*表14.2.3.2  12周的客观缓解率的敏感性分析（独立委员会评估） – 符合方案集;
+/*%tdor(outname=t14_2_3_2_orr12, source=%str(清单16.2.4.2), cond=and parcat1="独立委员会评估", flag=pprotfl, suf=pps);*/
+/**/
+/**表14.2.3.3  12周的客观缓解率的敏感性分析（研究者评估） – 全分析集;*/
+/*%tdor(outname=t14_2_3_3_orr12, source=%str(清单16.2.4.1), cond=and parcat1="研究者评估", flag=fasfl, suf=fas);*/
+/**/
+/**表14.2.3.4  12周的客观缓解率的敏感性分析（研究者评估） – 符合方案集;*/
+/*%tdor(outname=t14_2_3_4_orr12, source=%str(清单16.2.4.1), cond=and parcat1="研究者评估", flag=pprotfl, suf=pps);*/
+ 
+
+**clear work dataset**;
+%*mc_clrup;
+
+%put >>> Program run by &SYSUSERID on &sysdate9 at &systime <<<;
+
+proc printto;
+run;
