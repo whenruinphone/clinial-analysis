@@ -1,0 +1,311 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_dor.sas,v $
+REV/REV        : $Revision: 1194 $
+AUTH           : $Author: yang_yang $
+REV DATE       : $Date: 2020-04-10 15:16:30 +0800 (Fri, 10 Apr 2020) $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : TGS/HTGSCNON0222
+PURPOSE        : Create 表14.2.6.1  缓解持续时间的分析(独立委员会评估) –全分析集
+						表14.2.6.2  缓解持续时间的敏感性分析(独立委员会评估) – 符合方案集
+						表14.2.6.3  缓解持续时间的敏感性分析(研究者评估) – 全分析集
+						表14.2.6.4  缓解持续时间的敏感性分析(研究者评估) – 符合方案集
+INPUT FILES    : derived.adtte
+OUTPUT FILES   : t14_2_6_1_dor-t14_2_6_4_dor.RTF
+MACROS USED    : %mc_clrup, %mc_gtbtf, %mc_addpn
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+options noquotelenmax;
+
+**clear out work datasets;
+%mc_clrup;
+
+%let progname=t_dor;
+%let dataset=ADTTE;
+%let source=%str(清单16.2.5.1);
+
+proc printto log="&tablog\&progname..log" new;
+run;
+
+options spool;
+
+%macro tdor(outname=, source=, cond=, flag=, suf=);
+**Fetch data from derived.adtte**;
+data adtte;
+	set derived.adtte;
+	where trt01pn ne . &cond and paramcd="DOR" and &flag="是";
+	**PD PD前死亡 新抗肿瘤治疗 缺失连续两次或两次以上肿瘤评估 无证据表明进展而停止治疗 尚未出现疾病进展或PD前死亡;
+run;
+
+%let pop1=0;
+%let pop2=0;
+
+proc sql noprint;
+	select count(*) into :numobs from adtte;
+
+	**Header N-Subject with BOR=CR/PR-per sponsor comments;
+	select count(distinct usubjid) into :pop1-:pop2 from adtte 
+		group by trt01pn;
+quit;
+
+%put &numobs &pop1 &pop2;
+
+%if &numobs>0 %then %do;
+data adtte1;
+	set adtte;	
+	output;
+	**删失;
+	if cnsr=1 then do;
+		EVNTDESN=3;
+		EVNTDESC="删失";
+		output;
+	end;
+	else if cnsr=0 then do;
+		EVNTDESN=0;
+		EVNTDESC="事件";
+		output;
+	end;
+run;
+ 
+
+**状态;
+proc sql noprint;
+	create table freqs as select trt01pn, EVNTDESN, EVNTDESC, count(distinct usubjid) as count from adtte1
+		group by EVNTDESN, EVNTDESC, trt01pn;
+quit;
+
+
+**采用Kaplan-Meier方法估计中位DOR及其95%置信区间。;
+ods graphics off;
+**ods trace on;
+proc lifetest data=adtte;
+	time aval*cnsr(1);
+	strata trt01pn;
+	ods output Quartiles=i_qrt(rename=(lowerlimit=LCLM upperlimit=UCLM));
+run;
+
+**P值由分层log-rank检验得出（MIL60组 vs. 贝伐珠单抗组）。;
+proc lifetest data=adtte ;
+     time aval*cnsr(1);
+     strata sexn egfrn rmbfn / missing group=trt01pn;
+	ods output HomTests=p_value(where=(Test="Log-Rank"));
+run;
+
+**HR: Hazard Ratio， 两组风险比
+HR与其95%置信区间由分层Cox模型得出，模型包括组别和分层因素，分层因素为性别、EGFR基因状态（野生型vs.突变型），和有无脑转移。;
+**2020-04-10 按照sponsor comments（见2020/4/10 (周五) 12:51刘总邮件）改为分层COX模型，分层因素之前当作协变量处理，现改为分层分析;
+ods output parameterestimates=i_hr;
+proc phreg data=adtte;
+	**class trt01pn(ref='2') sexn(ref="1") egfrn(ref="1") rmbfn(ref="1")/param=reference;
+    **model aval*cnsr(1)=trt01pn sexn egfrn rmbfn/risklimits alpha=0.05; 
+	class trt01pn; 
+	model aval*cnsr(1)=trt01pn/risklimits alpha=0.05;
+	strata sexn egfrn rmbfn;
+run;
+
+**ods trace off;
+ods graphics on;
+
+**Set all Information Togather;
+data all;
+	length col2 stat $200;
+	set freqs(in=a)
+		i_qrt(in=b)
+		p_value(in=d)
+		i_hr(in=e);
+
+	if a then do;
+		ord=1;
+		sort=EVNTDESN;
+		col2="n (%)";
+		if trt01pn=1 then dem=&pop1;
+		else if trt01pn=2 then dem=&pop2;
+		if count=dem then stat=put(count,3.)||' (100)';
+		else stat=put(count,3.)||' ('||put(count*100/dem,5.1)||')';
+		stat=tranwrd(tranwrd(stat,'(  ','  ('),'( ',' (');
+		output;	
+	end;
+	else if b then do;
+		sort=1;
+		if percent=50 then do;
+			ord=2;
+			col2="中位数 (95% CI)";
+		end;
+		else if percent=25 then do;
+			ord=2.1;
+			col2="Q1 (95% CI)";
+		end;
+		else do;
+			ord=2.2;
+			col2="Q3 (95% CI)";
+		end;
+		if Estimate=. then stat="-";
+		else if nmiss(lclm, uclm)=0 then stat=strip(put(round(Estimate,0.001),12.3))||' ('||strip(put(round(lclm,0.001),12.3))||', '||strip(put(round(uclm,0.001),12.3))||')';
+		else if lclm ne . then stat=strip(put(round(Estimate,0.001),12.3))||' ('||strip(put(round(lclm,0.001),12.3))||', -)';
+		else if uclm ne . then stat=strip(put(round(Estimate,0.001),12.3))||' (-, '||strip(put(round(uclm,0.001),12.3))||')';
+		else if Estimate ne . then stat=strip(put(round(Estimate,0.001),12.3))||' (-, -)';
+		else stat='';
+		output;
+	end;
+	else if d then do;
+		trt01pn=1;
+		ord=4;
+		sort=1;
+		col2="分层 Log-Rank 检验 P值";
+		if ProbChiSq>0.9999 then stat=">0.9999";
+		else if ProbChiSq ne . then stat=strip(put(ProbChiSq, ?pvalue.));
+		output;
+	end;		
+	else if e then do;
+		trt01pn=1;
+		ord=5;
+		sort=1;
+		col2="分层 HR (95% CI)";
+		if nmiss(HRLowerCL, HRUpperCL)=0 then stat=strip(put(round(HazardRatio,0.001),12.3))||' ('||strip(put(round(HRLowerCL,0.001),12.3))||', '||strip(put(round(HRUpperCL,0.001),12.3))||')';
+		else if HRLowerCL ne . then stat=strip(put(round(HazardRatio,0.001),12.3))||' ('||strip(put(round(HRLowerCL,0.001),12.3))||', -)';
+		else if HRUpperCL ne . then stat=strip(put(round(HazardRatio,0.001),12.3))||' (-, '||strip(put(round(HRUpperCL,0.001),12.3))||')';
+		else if HazardRatio ne . then stat=strip(put(round(HazardRatio,0.001),12.3))||' (-, -)';
+		else stat='';
+		output;
+	end;		
+run;
+
+proc sort data=all;
+	by ord sort col2 trt01pn;
+run;
+
+
+proc transpose data=all out=all_t prefix=_;
+	by ord sort col2;
+	id trt01pn;
+	var stat;
+run;
+
+**Template;
+data template;
+	length col1 _1 _2 $200;
+	sort=-1;
+	ord=1;
+	do col1="事件","^w^wPD", "^w^wPD前死亡", "删失", "^w^w无基线后肿瘤评估", "^w^w新抗肿瘤治疗"
+			, "^w^w缺失连续两次或两次以上肿瘤评估", "^w^w无证据表明进展而停止治疗", "^w^w尚未出现疾病进展或PD前死亡";
+		sort+1;
+		_1="";
+		_2="";
+		output;
+	end;
+run;
+
+data final;
+	merge template all_t;
+	by ord sort;
+
+	col3=strip(_1);
+	col4=strip(_2);
+	
+	if ord ne 1 then do;
+		if ord=2 then col1="缓解持续时间（DOR） (月)";
+		else col1="";
+		grp=2;
+		col3="^R'\qj\tqdec\tx850 '"||strip(col3);
+		col4="^R'\qj\tqdec\tx850 '"||strip(col4);
+	end;
+	else if ord=1 then do;
+		col2="n (%)";
+		if _1="" then col3="0";
+		if _2="" then col4="0";
+
+		col3="^R'\qj\tqdec\tx1200 '"||strip(col3);
+		col4="^R'\qj\tqdec\tx1200 '"||strip(col4);
+		grp=1;
+	end;
+run;
+%end;
+%else %do;
+data final;
+	length col1-col4 $200 grp ord sort 8;
+	call missing(of _all_);
+run;
+%end;
+
+data tdata.&outname;
+	set final;
+	col1=compress(col1);
+	col2=compress(col2);
+	col3=compress(tranwrd(tranwrd(col3, "^R'\qj\tqdec\tx1200 '", " "), "^R'\qj\tqdec\tx850 '", ""));
+	col4=compress(tranwrd(tranwrd(col4, "^R'\qj\tqdec\tx1200 '", " "), "^R'\qj\tqdec\tx850 '", ""));
+	keep col:;
+run;
+
+
+**generate final rtf file**;
+ods listing close;
+ods rtf file = "&pathtab.\&outname..rtf" style = rptstyle;
+
+%mc_gtbtf(titledset=derived.ddtitles, name=&outname.); 
+%mc_addpn(data=final, by=grp ord sort, line=24); 
+
+proc report data=final nowindows missing split = "#" headline style(report)={cellwidth=100%};
+	column page pagetxt grp ord sort col1 col2 col3 col4;
+	
+	define	page	/order order=internal noprint;
+	define	pagetxt	/order=internal noprint;** left f=$150.;**;
+	define  grp		/order order=internal noprint;
+	define  ord		/order order=internal noprint;
+	define  sort	/order order=internal noprint;
+	define	col1 	/display  	style(column)={just=l vjust=b  cellwidth=24% }
+								style(header)={just=c vjust=b}	"";
+	define	col2    /display  	style(column)={just=l vjust=b  cellwidth=15%}
+								style(header)={just=l vjust=b}	"统计参数";
+	define	col3    /display  	style(column)={just=c vjust=b  cellwidth=15%}
+								style(header)={just=c vjust=b}	"MIL60组#(N=&pop1)";
+	define 	col4	/display	style(column)={just=c vjust=b  cellwidth=15%}
+								style(header)={just=c vjust=b}	"贝伐珠单抗组#(N=&pop2)";
+ 
+
+	compute before grp;
+		%if &numobs=0 %then %do;
+	        line ' ';
+	        line '未报告相关数据';
+		%end;
+		%else %do;
+	 		line '' ;
+		%end;
+    endcomp;
+
+    compute after page;
+ 		line '' ;
+    endcomp;
+
+    break after page /page;
+	%mc_adtf(adftxt=%str(pagetxt $200.),blank=NO,gap=yes);
+run;
+
+ods rtf close; 
+ods listing; 
+	
+%mend;
+
+
+*表14.2.6.1  缓解持续时间的分析(独立委员会评估) –全分析集;
+%tdor(outname=t14_2_6_1_dor, source=%str(清单16.2.5.2), cond=and parcat1="独立委员会评估", flag=fasfl, suf=fas);
+
+*表14.2.6.2  缓解持续时间的敏感性分析(独立委员会评估) – 符合方案集;
+%tdor(outname=t14_2_6_2_dor, source=%str(清单16.2.5.2), cond=and parcat1="独立委员会评估", flag=pprotfl, suf=pps);
+
+*表14.2.6.3  缓解持续时间的敏感性分析(研究者评估) – 全分析集;
+%tdor(outname=t14_2_6_3_dor, source=%str(清单16.2.5.1), cond=and parcat1="研究者评估", flag=fasfl, suf=fas);
+
+*表14.2.6.4  缓解持续时间的敏感性分析(研究者评估) – 符合方案集;
+%tdor(outname=t14_2_6_4_dor, source=%str(清单16.2.5.1), cond=and parcat1="研究者评估", flag=pprotfl, suf=pps);
+
+
+**clear work dataset**;
+%mc_clrup;
+
+
+%put >>> Program run by &SYSUSERID on &sysdate9 at &systime <<<;
+
+proc printto;
+run;
