@@ -1,0 +1,290 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: f_dor.sas,v $
+REV/REV        : $Revision: 1.6 $
+AUTH           : $Author: yang_yang $
+REV DATE       : $Date: 2019/10/31 07:54:29 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : YHY/HYHYCNON0522
+PURPOSE        : Create figure f_14_7_6_1, f_14_7_6_2 不同瘤种的缓解持续时间Kaplan-Meier曲线
+INPUT FILES    : derived.adtte
+OUTPUT FILES   : f_14_7_6_1, f_14_7_6_2
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+proc datasets lib=work mt=data kill nolist nowarn; run;
+
+%mc_clrup;
+
+%let progname=f_dor;
+%let dataset=ADTTE;
+%let source=%str(清单16.2.6.10);
+
+proc printto new log="&figlog.\&progname..log" new; run;
+
+%macro fdor(outname=, flag=, flg=);
+**Filter data;
+proc sort data=derived.adtte out=adtte0;
+	by canclasn canclas aval;
+	where &flag="是" and paramcd="DOR" and canclasn ne .  and aval>0;
+run;
+
+proc sql noprint;
+  	create table check as select canclasn, canclas, count(distinct usubjid) as event from adtte0 where cnsr=0
+		group by canclasn, canclas;
+quit;
+
+data check;
+	set check;
+
+	array dem(12) _temporary_ (&&&flg.pop1, &&&flg.pop2, &&&flg.pop3, &&&flg.pop4, &&&flg.pop5, &&&flg.pop6
+							  , &&&flg.pop7, &&&flg.pop8, &&&flg.pop9, &&&flg.pop10, &&&flg.pop11, &&&flg.pop);
+	do j=1 to 12;
+		if canclasn=j then do;
+			if event ne . then chkpct=event/dem[j];
+			else chkpct=0;
+			pop=dem[j];
+		end;
+	end;
+run;
+
+data adtte;
+	merge adtte0 check(in=a where=(chkpct>=0.5));
+	by canclasn canclas;
+
+/*	if a;*/
+run;
+
+proc sql noprint;
+	select max(ceil(aval)), max(ceil(aval/28)) into :maxtime, :increment from adtte;
+	select count(distinct cnsr), count(distinct canclas) into :cnsrcat, :ntrt from adtte;
+quit;
+
+%do a=1 %to &ntrt;
+	%let trt&a=0;
+%end;
+
+%put maxtime=&maxtime increment=&increment cnsrcat=&cnsrcat ntrt=&ntrt;
+
+ods graphics;
+ods _all_ close;
+
+**ods trace on;
+ods output %if &cnsrcat>1 %then %do; HomTests=HomTests %end; ProductLimitEstimates=ProductLimitEstimates ;
+proc lifetest data = adtte method=km atrisk alpha=0.05;
+	time aval * cnsr(1); 
+	strata canclas / test = logrank; 
+run;
+ 
+** create dataset atrisk to hold the timepoint for number of patients at risk as per shell **;
+ods output ProductLimitEstimates=Atrisk  SurvivalPlot=SurvivalPlot ;
+proc lifetest data = adtte plots=survival(atrisk=0 to &maxtime by 1 );
+	time aval * cnsr(1); 
+	strata canclas / test = logrank; 
+run;
+ods trace off; 
+ods output close;
+
+data _null_;
+	set ProductLimitEstimates;	
+	by Stratum;
+
+	if first.Stratum then call symput('trt'||strip(put(Stratum, ?best.)), '1');
+run;
+
+data SurvivalPlot1;
+	set SurvivalPlot;
+	by StratumNum Stratum; 
+
+	Stratum=strip(scan(Stratum, 2, ':'));
+	output;
+	if last.Stratum then do;
+		if tAtRisk<&maxtime and atrisk=0 then do;
+			add=1;
+			lastmonth=tAtRisk;
+			do tAtRisk=lastmonth+1 to &maxtime ;
+				Time=tAtRisk;
+				output;
+			end;
+		end;
+	end;
+run;
+
+data fdata.&outname.;
+	set SurvivalPlot1;
+run;
+
+
+%global pvalue;
+** Check P-value **;
+%macro dataset_exist_macro(ds);
+    %let ds_flag = %sysfunc(open(&ds,is));  
+    %if &ds_flag. eq 0 %then %do;  
+        %put '数据集不存在'; 
+        %let pvalue=-; 
+    %end;  
+    %else %do;  
+        %put '数据集存在';
+
+      	data _null_;
+        	set &ds. (keep=ProbChiSq);
+        	if ProbChiSq ne . then call symputx('pvalue', put(ProbChiSq, pvalue8.4) );
+        	else call symputx('pvalue', '-' );
+      	run;
+
+	  	%let ds_close = %sysfunc(close(&ds_flag.));
+    %end;	
+%mend;
+
+%dataset_exist_macro(ds=work.HomTests);
+
+%put &pvalue; 
+
+
+proc template;
+  define style myfont;
+    parent=rptstyle;
+    style GraphFonts from GraphFonts/
+         'GraphDataFont' = ("宋体",8pt)
+         'GraphUnicodeFont' = ("宋体",8pt)
+         'GraphValueFont' = ("宋体",8pt)
+         'GraphLabelFont' = ("宋体",8pt)
+         'GraphFootnoteFont' = ("宋体",8pt)
+         'GraphTitleFont' = ("宋体",8pt)
+         'GraphAnnoFont' = ("宋体",8pt);
+    end;
+run;
+
+
+/*
+ %let symbol1=circlefilled; 			%let color1=blue; 		%let pattern1=1;
+ %let symbol2=triangledownfilled; 	%let color2=red; 		%let pattern2=1;
+ %let symbol3=squarefilled; 			%let color3=green; 		%let pattern3=1;
+ %let symbol4=starfilled; 			%let color4=purple; 	%let pattern4=1;
+ %let symbol5=diamondfilled;			%let color5=orange; 	%let pattern5=1;
+
+ **http://documentation.sas.com/?docsetId=grstatug&docsetTarget=n0gtq6xhfzysl1n1c26dp8y7wwfw.htm&docsetVersion=9.4&locale=en;
+ */
+
+ods path(p) work.template(update) work.styles(read) sasuser.templat(read)  sashelp.tmplmst(read);
+
+proc template;
+  define statgraph dorplot;
+    begingraph / border=false designheight=570px designwidth=850px;
+	   **discreteattrmap name="treat" / ignorecase=true ;	 
+	   **  value "胃癌"  /lineattrs=(color=blue pattern=1 thickness=0.01) markerattrs=(size=8px symbol=circle color=blue );
+       ** enddiscreteattrmap;
+	   **discreteattrvar attrvar=dosemark var=dosegrp attrmap="treat";
+   		
+	  %do a=1 %to &ntrt;  		
+		  %if &&trt&a.=1 %then %do;
+		  	  **Use the default Style;
+			  legendItem type=marker name="m_marker&a." / markerattrs=GraphData&a 
+			  %if &a=&ntrt %then %do; label='Censoring Times' labelattrs=(color=black size=8 family="sasfont"); %end;;
+ 		  %end;
+	  %end;
+
+	  layout lattice/	rows = 3
+						rowweights = (0.78 0.03 0.19)
+						columns = 1
+						columngutter = 0
+						border = false;
+	  
+	  	layout overlay / 
+               xaxisopts=(display=all 
+			              label="时间（月）" labelattrs = (size=8 family="sasfont")
+						  tickvalueattrs = (size=7 )
+					      type = linear    							
+						  offsetmin=0.05
+					      linearopts = (tickvaluefitpolicy=none
+                                        tickvaluesequence=(start=0 end=&maxtime. increment=&increment.)
+ 									    tickvaluerotation=diagonal 
+                                        viewmin=0 viewmax=&maxtime.)
+                         )
+		       yaxisopts=(display=all
+                         label='持续缓解百分比（%）' labelattrs=(size=8 family="sasfont") 
+		                 tickvalueattrs = (size=7 )
+					     type = linear 
+                         linearopts = (tickvaluesequence=(start=0 end=1 increment=0.25 )
+						               tickdisplaylist=('0%' '25%' '50%' '75%' '100%')
+					                   minorticks=false
+                                       viewmin=-0.015 viewmax=1.025)		                 
+                        );	
+            stepplot y=survival x=TIME / group=Stratum index=stratumnum name="Survival" rolename=(_tip1=ATRISK _tip2=EVENT) tiplabel=(_tip1="Number at Risk" _tip2=
+               "Observed Events") tip=(x y _tip1 _tip2) legendlabel="Survival" lineattrs=(pattern=1);
+
+			scatterplot x=time y=censored/group=Stratum jitter=auto jitteropts=(axis=x width=0.08) tiplabel=(y="Survival Probability") name="Censored" ;*legendlabel="Censored";
+           
+
+		  	** Legend **;
+	     	discretelegend  %do a=1 %to &ntrt;  %if &&trt&a.=1 %then %do; "m_marker&a" %end; %end;
+							  / valueattrs = (family = "sasfont" size=6.5)
+                                border = false
+	                            pad=(left=1px bottom=68px)
+		                        location= inside down=1 across=10
+							    halign =  left						 
+							    valign =  bottom;
+
+			mergedlegend  "Survival" "Censored" /border=false location=inside pad=(bottom=0.1cm left=0.1cm)
+												 autoalign=(bottomleft )
+												 across=2;
+			**Remove;
+			**entry halign = left  "Non-stratified logrank p value=&pvalue	"/ valign=bottom;
+        endlayout;
+
+		layout overlay / walldisplay=none xaxisopts=(display=none);
+		 	entry halign=left "Number of subjects at risk" / valign=top;
+		endlayout;
+		
+		layout overlay / walldisplay=none xaxisopts=(display=none);
+		 	
+	    	blockplot x=tAtRisk block=atrisk / display=(label values) labelattrs=(size=8 family="sasfont")
+                              class=Stratum  valuehalign=start EXTENDBLOCKONMISSING=false repeatedvalues=true;
+		endlayout;
+
+	  endlayout;
+   endgraph;
+ end;
+run;
+
+
+**Get titles, footnotes and add page numbering;
+%let pg1=1;
+%let pg2=1;
+
+%mc_gtbtf(titledset=derived.ddtitles,  name=&outname);
+%mc_adgtf;
+%mc_addpn(type=FI, data=SurvivalPlot1);
+
+
+**Produce figure;
+ods listing close;
+ods rtf file = "&pathfig\&outname..rtf" style=myfont nogtitle nogfootnote ;
+
+**graph output set;
+goptions device=png noborder ;
+ods graphics on/ reset height = 15.2cm width=22.0cm  noborder imagefmt=png ;
+proc sgrender data=SurvivalPlot1 template=dorplot;
+run;
+
+ods listing;
+ods rtf close;
+
+%mend fdor;
+
+
+*图14.7.6.1不同瘤种的缓解持续时间Kaplan-Meier曲线 – 全分析数据集;
+%fdor(outname=f_14_7_6_1, flag=FASFL, flg=fas);
+
+*图14.7.6.2不同瘤种的缓解持续时间Kaplan-Meier曲线 – 符合方案集;
+%fdor(outname=f_14_7_6_2, flag=PPSFL, flg=pps);
+
+
+goptions reset = all;
+
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
