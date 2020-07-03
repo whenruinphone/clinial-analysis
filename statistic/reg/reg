@@ -1,0 +1,231 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: t_pphome.sas,v $
+REV/REV        : $Revision: 1.4 $
+AUTH           : $Author: kou_yunyun $
+REV DATE       : $Date: 2019/10/29 09:19:56 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT :YHY/HYHYCNON0522
+PURPOSE        :create table 14.4.5
+INPUT FILES    :derived.adpc
+OUTPUT FILES   :表14.4.5 血药浓度稳态检验–药代动力学数据集  
+MACROS USED    :%mc_clrup %mc_pop %mc_gtbtf %mc_addpn %mc_adtf
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+**clear out temporay datases in work library and reset;
+%mc_clrup;
+**set program name;
+%let progname = t_pphome;
+%let outname =t_14_4_5;
+%let dataset = %str(ADPC);
+%let source=%str(清单16.2.5.4);
+options noquotelenmax;
+%put >>>>>Start program of %upcase(&progname..sas)<<<<<;
+
+
+proc printto log = "&tablog\&progname..log"  new; 
+run;
+/*************************start ***************************************************/
+**fetch needed adam;
+data tot;
+	set derived.adpc(where=(PKSFL='是' and aconc^='' and avisitn in (8,10,11)));
+	if ACONC="BQL" then aval=0;
+	else aval=input(ACONC,best.);
+run;
+
+proc sort data =tot;
+	by CANCLASN ENRLID avisitn avisit;
+run;
+
+**** for p;
+ods output parameterestimates=pvalue(where=(variable ne 'Intercept'));
+proc reg data=tot(where=(aval ne .));
+by CANCLASN ENRLID ;
+model aval=avisitn;
+run;
+
+/*create template*/
+proc sort data=derived.adpc(where=(PKSFL='是')) out=temp_(keep=ENRLID CANCLASN) nodupkey;
+	by ENRLID;
+run;
+
+data temp;
+	set temp_;
+	length avisit $200;
+	do avisit="第2周期D15","第3周期D1","第3周期D15";
+		output;
+	end;
+run;
+
+proc sort data=temp;
+	by ENRLID avisit;
+run;
+
+proc sort data=tot;
+	by ENRLID avisit;
+run;
+
+data tot_;
+	merge tot temp;
+	by ENRLID avisit;
+	keep ENRLID avisit  CANCLASN aval ACONC;
+run;
+
+proc sort data=pvalue;
+	by ENRLID;
+run;
+
+data pvalue_;
+	merge pvalue temp_;
+	by ENRLID;
+run;
+
+**combine;
+data fnl;
+	set pvalue_(in=b) tot_(in=a );
+	length col1 col2 col3 col4  $200.;
+	col1=ENRLID;
+	col2=avisit;
+	if b then col3="稳态检验p值";
+
+	if a then do;
+		if ACONC^="" then col4=strip(ACONC);
+		else col4="-";
+	end;
+	if b then do;
+		if probt^=. then col4=strip(put(Probt,pvalue6.4));
+		else col4="";
+	end;
+	if a then ord=1;
+	if b then ord=2;
+
+	keep CANCLASN ord avisit col: ; 
+run;
+
+proc sort data=fnl out=final;
+	by CANCLASN col1 ord  avisit;
+run;
+
+
+*--------------------------------------------------------------------------------------------*;
+* Save dataset for QC;
+*--------------------------------------------------------------------------------------------*;
+data tdata.&outname.;
+	set final;
+    keep CANCLASN col:;
+	format _all_;
+	informat _all_;
+	attrib _all_ label="";
+run;
+
+**get titles and footntes;
+%mc_gtbtf(titledset=derived.ddtitles,name=&outname.);
+ods listing close;
+ods escapechar="^";
+ods rtf file="&pathtab.\&outname..rtf" style=rptstyle author="&sysuserid";
+		**numbering and pagination;
+%mc_addpn(data=final,
+			      by  =CANCLASN col1 ord ,line=,
+				  pageno=%str(line+1;
+				  			if line >20 or first.CANCLASN then line =1;
+							if line=1 then page+1;)
+		);
+                 
+options mlogic mprint symbolgen;
+%macro report;
+%do flag=1  %to 11;
+	%if &flag = 1 %then %do;
+		%let char = %str(肿瘤组别：胃癌组); 
+	%end;
+
+	%if &flag = 2 %then %do;
+		%let char = %str(肿瘤组别：食管癌组); 
+	%end; 
+
+	%if &flag = 3 %then %do;
+		%let char = %str(肿瘤组别：经典型霍奇金淋巴瘤组); 
+	%end; 
+
+	%if &flag = 4 %then %do;
+		%let char = %str(肿瘤组别：肺癌组); 
+	%end; 
+
+	%if &flag = 5 %then %do;
+		%let char = %str(肿瘤组别：鼻咽癌组); 
+	%end;
+
+	%if &flag = 6 %then %do;
+		%let char = %str(肿瘤组别：外周T/NK细胞淋巴瘤组); 
+	%end; 
+
+	%if &flag = 7 %then %do;
+		%let char = %str(肿瘤组别：尿路上皮癌组); 
+	%end; 
+
+	%if &flag = 8 %then %do;
+		%let char = %str(肿瘤组别：基底细胞癌组); 
+	%end;
+
+	%if &flag = 9 %then %do;
+		%let char = %str(肿瘤组别：肝癌组); 
+	%end; 
+
+	%if &flag = 10 %then %do;
+		%let char = %str(肿瘤组别：胆管癌组); 
+	%end; 
+
+	%if &flag = 11 %then %do;
+		%let char = %str(肿瘤组别：其他); 
+	%end; 
+
+		data report_slt;
+			set final;
+			where CANCLASN=&flag;
+		run;
+
+
+		proc report data=report_slt nowd missing split="#" 
+							   style(header)={font_weight=bold} 
+							   style(column)={vjust=b} style(report)={cellwidth=100%};
+			column ("^R'\par\ql '&char &border." page pagetxt CANCLASN col1 ord col2 col3 col4);
+			define page /order order=internal noprint;
+			define pagetxt/ order=internal noprint left format=$150.;   **  no order, no group effect **;
+			define CANCLASN/order order=internal noprint;
+			define col1   /order  flow  "入组号" 
+								style(header)={just=l} style(column)={just=l cellwidth=25%};
+			define ord/order order=internal noprint;
+
+			define col2       /order "检查时间点"
+		                        style(column)={just=l cellwidth=25%} 
+		                        style(header)={just=l};
+			define col3		  /display "统计参数"
+		                        style(column)={just=l cellwidth=25%} 
+		                        style(header)={just=l};
+			define col4       /display "GLS-010药物浓度(μg/mL)"
+		                        style(column)={just=l cellwidth=24% asis=on pretext="^R'\tqdec\tx900 '"} 
+		                        style(header)={just=l};
+
+		    break after page/page;
+			compute before page/style={just=center};
+				line "";
+			endcomp;
+			compute after col1/style(lines)={just=left};
+				line "";
+			endcomp;
+	
+			%mc_adtf(adftxt=%str(pagetxt $200.), split=yes,gap=no, blank=none);
+		quit;
+
+	%end;
+ods rtf close;
+ods listing;
+%mend;
+
+%report;
+
+proc printto;
+run;
+
+%put >>>>>End program of %upcase(&progname..sas), run by %upcase(&sysuserid.), &sysdate9. at &systime.<<<<<;
