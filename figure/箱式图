@@ -1,0 +1,239 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: f_ppbox.sas,v $
+REV/REV        : $Revision: 1.1 $
+AUTH           : $Author: yang_yang $
+REV DATE       : $Date: 2019/09/12 01:19:34 $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : YHY/HYHYCNON0122
+PURPOSE        : Create figure f_14_7_4, f_14_7_5 
+INPUT FILES    : derived.adpp
+OUTPUT FILES   : f_14_7_4, f_14_7_5
+MACROS USED    :
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+
+proc datasets lib=work mt=data kill nolist nowarn; run;
+
+%mc_clrup;
+
+%let progname=f_ppbox;
+%let dataset=ADPP;
+%let source=%str(清单16.2.5.5);
+
+
+proc printto new log="&figlog.\&progname..log" new; run;
+
+proc template;
+	define style myfont;
+	parent=rptstyle;
+	style GraphFonts from GraphFonts/
+         'GraphDataFont' = ("宋体",9pt)
+         'GraphUnicodeFont' = ("宋体",6pt)
+         'GraphValueFont' = ("宋体",10pt)
+         'GraphLabelFont' = ("宋体",10pt)
+         'GraphFootnoteFont' = ("宋体",6pt)
+         'GraphTitleFont' = ("宋体",6pt)
+         'GraphAnnoFont' = ("宋体",6pt);
+	end;
+run;
+
+
+**对于单次给药后胃癌、食管癌、经典型霍奇金淋巴瘤、尿路上皮癌组的药代参数（Cmax和AUC0-336h），分别绘制相对于剂量的盒图，以描述其剂量依赖性。;
+%macro _box(outname=, cond=, bygrp=, ylabel=, YMIN=, YMAX=, YINC=);
+
+%*Derived the analysis dataset**;
+data adpp;
+	set derived.adpp;
+	where pksfl="是" and parcat1n=1 and canclas in ("胃癌", "食管癌", "经典型霍奇金淋巴瘤", "尿路上皮癌") &cond.;
+
+	page=1;
+
+	rename aval=aval1;
+run;
+
+proc sort data=adpp;
+	by subjid;
+run;
+
+data adex;
+	set derived.adex;
+	where pksfl="是" and canclas in ("胃癌", "食管癌", "经典型霍奇金淋巴瘤", "尿路上皮癌") and visit="第1周期D1";
+
+	keep subjid exdosep;
+run;
+
+proc sort data=adex;	
+	by subjid;
+run;
+
+data final;
+	merge adpp(in=a) adex(in=b);
+	by subjid;
+
+	if a ;
+
+	if exdosep ne . then aval=aval1/exdosep;
+run;
+
+proc sort data=final;
+	by canclasn canclas &bygrp ;
+run;
+
+data _null_;
+	length alltrt $200;
+	set final end=last;
+	by canclasn canclas &bygrp ;
+
+	retain alltrt;
+	if first.canclas then alltrt=strip(alltrt)||' '||quote(strip(canclas));
+	if last then call symput("mtreats", strip(alltrt));
+run;
+
+%if &bygrp ne %then %do;
+	proc sort data=final;
+		by &bygrp canclasn canclas;
+	run;
+
+	data final fdata.&outname.;
+		set final(drop=page);
+		by &bygrp canclasn canclas;
+		
+		retain page;
+		if first.&bygrp then page+1;
+
+		if first.&bygrp then call symput("entitle"||strip(put(page, ?best.)), strip(&bygrp.c));
+	run;
+%end;
+
+
+%let maxpg=1;
+
+proc sql noprint;
+	select mean(aval) into :references from final;
+	select distinct quote(strip(canclas)) into :mtreats separated by " " from final;
+	%if &bygrp ne %then %do;
+		select count(distinct &bygrp) into :maxpg from final;
+	%end;
+quit;
+
+%put &mtreats;
+*** =======================================================================;
+** This will allow us to define a new temporary template;
+ods path(prepend) work.templat(update);
+
+*** =======================================================================;
+*** Define Graph Template **;
+proc template;
+	define statgraph boxplot1;
+		dynamic XLABEL YLABEL YMIN YMAX YINC %if &bygrp ne %then %do; entitle  %end;;
+
+		begingraph	/	border = false 
+						designheight = 420px 
+						designwidth = 800px
+;
+
+			%if &bygrp ne %then %do;
+				entrytitle ENTITLE/ TEXTATTRS=(family='sasfont' size=9);
+			%end;
+
+			discreteattrmap name="boxplotmap"/ignorecase=true;
+				value "胃癌"		 		/lineattrs=(color=green pattern=1) markerattrs=(symbol=circle color=green);
+				value "食管癌"		 		/lineattrs=(color=blue pattern=1) markerattrs=(symbol=square color=blue);
+				value "经典型霍奇金淋巴瘤"	 /lineattrs=(color=red pattern=1) markerattrs=(symbol=x color=red);
+				value "尿路上皮癌" 			/lineattrs=(color=darkorchid pattern=1) markerattrs=(symbol=star color=darkorchid);
+ 			enddiscreteattrmap;		 
+      		discreteattrvar attrvar=fillcolor var=canclas attrmap="boxplotmap";
+
+			*** define the options;
+			layout overlay 	/	xaxisopts = (	display = (label tickvalues ticks)
+												label=XLABEL
+												type = discrete
+												labelattrs=(size=8pt)
+												discreteopts = (tickvaluelist=( &mtreats) tickdisplaylist = (&mtreats) )
+												tickvalueattrs = (family = "宋体"  size=7pt)
+												offsetmin = 0.2
+												offsetmax = 0.2
+												)
+												
+														
+								yaxisopts = (	display = (label ticks tickvalues)
+												type = linear	
+												label=YLABEL	
+												labelattrs=(size=8pt)
+/*												labelfitpolicy=splitalways*/
+/*												labelsplitchar='#'	*/
+												linearopts = (	tickvaluefitpolicy = none 
+																tickvaluesequence = (start=YMIN end=YMAX increment=YINC)
+																viewmin=&ymin viewmax=&ymax
+																/*tickvaluepriority = true*/)
+												tickvalueattrs = (family = "宋体" size=7pt)
+												offsetmin = 0.1
+												offsetmax = 0.1
+												) 	
+												;
+
+				** graph plot **;
+				boxplot x=canclas y=aval /   name = "boxplot" group=fillcolor 
+			                              	meanattrs = (symbol = squarefilled size = 8px color=black)
+			                             	medianattrs = (pattern = solid color=black) 
+										  	outlineattrs = (pattern = solid color=black ) 
+										  	outlierattrs = (color=black symbol =circlefilled) 
+			                              	capshape = serif
+											;
+
+				referenceline y=&references./ lineattrs=(pattern=2);
+
+			endlayout;
+		endgraph;
+	end;
+run;
+data fdata.&outname.;
+	set final;
+run;
+%*Fetch title and footnote;
+%mc_gtbtf(titledset=derived.ddtitles,  name=&outname);
+
+%mc_adgtf;
+
+%let pg2=&maxpg;
+
+%* Produce figure;
+ods listing close;
+ods rtf file="&pathfig\&outname..rtf"  headery=1700 footery=1645  style=myfont author="&sysuserid" nogtitle nogfootnote;
+
+**graph output set;
+goptions device=png noborder ;
+ods graphics on/ reset height = 11.4cm width=22.0cm  noborder imagefmt=png ;
+
+%do k=1 %to &maxpg;
+
+%let pg1=&k;	
+
+%*Add pagetext;
+%mc_addpn(type=FI, data=final, line=, pgvar=page);
+
+proc sgrender data=final(where=(page=&k)) template=boxplot1;
+	dynamic xlabel="瘤种" ylabel="&ylabel." %if &bygrp ne %then %do; entitle="&&entitle&k"; %end;
+			YINC=&YINC YMIN=&YMAX YMIN=&YMAX;
+run;
+%end;
+
+
+ods rtf close;
+ods listing;
+
+%mend;
+
+*图14.7.4 Cmax相对于剂量的盒图 - 药代动力学数据集;
+%_box(outname=f_14_7_4, cond=and paramcd='CMAX', ylabel=%str(剂量调整的Cmax (ug/mL per mg)), YMIN=0.1, YMAX=0.8, YINC=0.1);
+
+*图14.7.5 AUC0-336相对于剂量的盒图 - 药代动力学数据集;
+%_box(outname=f_14_7_5, cond=and paramcd='AUCTAU', ylabel=%str(剂量调整的AUC0－tau (h*ug/mL per mg)), YMIN=20, YMAX=90, YINC=10) ;
+
+ 
+%put NOTE: PROGRAM %upcase(&progname).sas run by &sysuserid on &sysdate9. at &systime. ;
+
+proc printto;
+run;
