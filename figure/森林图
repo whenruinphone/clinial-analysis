@@ -1,0 +1,335 @@
+/*******************************************************************************
+- - - - - - - - - - - - DO NOT EDIT THE NEXT 4 LINES  - - - - - - - - - - - -
+PROGRAM NAME   : $RCSfile: f_orr.sas,v $
+REV/REV        : $Revision: 1025 $
+AUTH           : $Author: kou_yunyun $
+REV DATE       : $Date: 2019-12-03 15:35:23 +0800 (Tue, 03 Dec 2019) $ UTC
+- - - - - - - - - - - - DO NOT EDIT THE 4 LINES ABOVE - - - - - - - - - - - -
+CLIENT/PROJECT : TGS/HTGSCNON0222
+PURPOSE        : 图14.5.1.5  ORR亚组分析森林图 – 全分析集
+INPUT FILES    : derived.adrs
+OUTPUT FILES   : f14_1_5_orr
+MACROS USED    : %mc_clrup, %mc_gtbtf, %mc_addpn, %mc_adtf, %mc_pop
+NOTES          :
+Copyright (C)  WuXi CDS   All Rights Reserved.
+******************************************************************************/
+%mc_clrup;
+
+%let progname=f_orr;
+%let outname=f14_5_1_5_orr;
+%let source=%str(表14.2.3.1，表14.2.9.4.1，表14.2.9.4.2，表14.2.9.4.3，表14.2.9.4.4);
+%let dataset=ADRS;
+options PS=max ;
+
+proc printto new log="&figlog.\&progname..log";
+run;
+
+** Program header;
+%put >>>>> Start of PROGRAM %upcase(&progname).sas <<<<<;
+*** Fetch and Sort data form DERIVED.ADTR and ADRS ***;
+
+data adrs;
+  set derived.adrs(where=(param='12周最佳总体疗效' and fasfl='是' and parcat1='独立委员会评估'));
+  if AVALC in ('完全缓解(CR)', '部分缓解（PR)', '部分缓解(PR)') then do;orr=1;orrfl='是';end;
+    else orr=2;
+
+	drop trt01pn sex: ecog: MDCLS: AGEGR1: RMBF: EGFR:;
+run;
+
+
+data adsl;
+  set derived.adsl(where=(fasfl='是'));
+
+  if SUSTATN in (2,3) then do;SUSTATN=1;SUSTAT='有吸烟史';end;
+  if SUSTAT^='有吸烟史' and SUSTATN^=. then do;SUSTATN=2;SUSTAT='无吸烟史';end;
+
+  keep usubjid trt01pn sustat: ecog: MDCLS: sex: AGEGR1: RMBF: EGFR:;
+run;
+
+data adrs;
+	merge adsl(in=b) adrs(in=a);
+	by usubjid;
+	if a then adrsfl='Y';
+run;
+
+data adrs1(where=(adrsfl='Y')) adsl_;
+	length group srt $200;
+	set adrs;
+	if SEX='男' then sexn=1;
+	else if SEX='女' then sexn=2;
+
+	if AVALC in ('完全缓解(CR)', '部分缓解（PR)', '部分缓解(PR)') then orr=1;
+    else orr=2;
+	if orrfl='' then orrfl='否';
+
+  if ECOGBL=0 then ECOG='0分';
+  else if ECOGBL=1 then ECOG='1分';
+  	do;
+  		grp=0;
+		group='总体';
+		sort=0;
+		srt='总体';
+		output;
+  	end;
+
+	if sexn^=. then do;
+		grp=1;
+		group='性别';
+		sort=sexn;
+		srt=sex;
+		output;
+		sort=0;
+		srt='性别';
+		output;	
+	end;
+	
+	if EGFRN^=. then do;
+		grp=2;
+		group='EGFR基因状态';
+		sort=EGFRN;
+		srt=EGFR;
+		output;
+		sort=0;
+		srt='EGFR基因状态';
+		output;	
+	end;
+	
+	if RMBFN^=. then do;
+		grp=3;
+		group='有无脑转移';
+		sort=RMBFN;
+		srt=RMBFL;
+		output;
+		sort=-1;
+		srt='有无脑转移';
+		output;	
+	end;
+	
+	if AGEGR1N^=. then do;
+		grp=4;
+		group='年龄';
+		sort=AGEGR1N;
+		srt=AGEGR1;
+		output;
+		sort=0;
+		srt='年龄';
+		output;	
+	end;
+	
+	if ECOGBL^=. then do;
+		grp=5;
+		group='ECOG评分';
+		sort=ECOGBL;
+		srt=ECOG;
+		output;
+		sort=-1;
+		srt='ECOG评分';
+		output;	
+	end;
+	
+	if SUSTATN^=. then do;
+		grp=6;
+		group='吸烟史';
+		sort=SUSTATN;
+		srt=SUSTAT;
+		output;
+		sort=0;
+		srt='吸烟史';
+		output;	
+	end;
+
+	if MDCLSN^=. then do;
+		grp=7;
+		group='临床分期';
+		sort=MDCLSN;
+		srt=MDCLS;
+		output;
+		sort=0;
+		srt='临床分期';
+		output;	
+	end;
+run;
+***Calculate subgroup
+number;
+proc sql noprint ;
+	
+	create table all as	
+	select grp,group,sort,srt,count(distinct usubjid) as count
+	from adsl_
+	where trt01pn^=.
+	group by grp,group,sort,srt
+	order by grp,group,sort,srt;
+
+	create table bign as	
+	select grp,group,sort,srt,trt01pn,count(distinct usubjid) as count
+	from adsl_
+	where trt01pn^=.
+	group by grp,group,sort,srt,trt01pn
+	order by grp,group,sort,srt,trt01pn;
+
+	
+	create table orrn as	
+	select grp,group,sort,srt,trt01pn,count(distinct usubjid) as count
+	from adsl_
+	where trt01pn^=. and orr=1
+	group by grp,group,sort,srt,trt01pn
+	order by grp,group,sort,srt,trt01pn;
+quit;
+
+proc transpose data=bign out=bign1 prefix=_;
+	by grp group sort srt;
+	var count;
+	id trt01pn;
+run;
+
+proc transpose data=orrn out=orrn1 prefix=c;
+	by grp group sort srt;
+	var count;
+	id trt01pn;
+run;
+
+proc sort data=adrs1;
+	by grp group sort srt;
+run;
+
+ods graphics off;
+proc glimmix data=adrs1;
+	by grp group sort srt;
+	class trt01pn(ref=last) ;
+	model orr=trt01pn /dist=binary link=log;
+	estimate 'RR for trt 90' trt01pn 1-1/exp alpha=0.1;
+	nloptions MAXITER= 700;
+	**estimate 'RR for trt 95' trt01pn 1-1/exp alpha=0.05;
+	ods output Estimates=stat_rate2(where=(label='RR for trt 90')) ;
+run;
+ods graphics on;
+
+data stat;
+	length stat label1 label2 label3 $200;
+	merge stat_rate2 bign1 orrn1 all  ;
+	by grp group sort srt;
+
+	if grp<4 then page=1;
+	else page=2;
+
+	if first.group and grp in (0,4) then ord=0;
+
+	if first.group then ord+1;
+	else ord+0.5;
+
+	**比值和90%置信区间;
+	if not first.grp or grp=0 then do;
+		if nmiss(expEstimate,expLower,expUpper)=0 then stat=strip(put(expEstimate,10.2))||' ('||strip(put(expLower,10.3))||', '||strip(put(expUpper,10.3))||')';
+		else if expEstimate^=. and nmiss(expLower,expUpper)=2 then stat=strip(put(expEstimate,10.2))||' (-,-)';
+		label1=strip(srt)||"(N="||strip(put(count,best.))||")";
+		label2=strip(put(C1,best.))||"/"||strip(put(_1,best.))||"("||strip(put(C1/_1*100,12.1))||"%)";
+		label3=strip(put(C2,best.))||"/"||strip(put(_2,best.))||"("||strip(put(C2/_2*100,12.1))||"%)";
+	end;
+	else do;
+		label1=strip(srt);
+		expLower=.;
+		expUpper=.;
+		expEstimate=.;
+	end;
+
+	indentWt=2;
+	indentWt1=2.5;
+	indentWt2=3;
+	or='两组ORR比值及90%CI';
+	trt='亚组(受试者人数)';
+	trt1='MIL60组 n/N(%)';
+	trt2='贝伐珠单抗组 n/N(%)';
+
+	label label1='亚组(受试者人数)'
+			label2='MIL60组 n/N(%)'
+			label3='贝伐珠单抗组 n/N(%)';
+run;
+
+proc sort data=stat;
+	by grp group sort srt;
+run;
+
+proc sort data=stat out=fdata.&outname(keep=group srt label1 label2 label3 stat);
+	by grp group sort srt;
+run;
+
+data attrmap;
+	id='text'; value='1'; textcolor='Black'; textsize=10;  output;
+	id='text'; value='2'; textcolor='Black'; textsize=8; output;
+run;
+
+proc template;
+	define style myfont;
+	parent=rptstyle;
+	style GraphFonts from GraphFonts/
+			'GraphDataFont'    = ("宋体",9pt)
+			'GraphUnicodeFont' = ("宋体",9pt)
+			'GraphValueFont'   = ("宋体",9pt)
+			'GraphLabelFont'   = ("宋体",9pt)
+			'GraphFootnoteFont'= ("宋体",9pt)
+			'GraphTitleFont'   = ("宋体",9pt)
+			'GraphAnnoFont'    = ("宋体",9pt);
+	end;
+run;
+
+
+*** Create Figure by Proc report ***;
+*--------------------------------------------------------------------------------------------*;
+%mc_gtbtf(titledset=derived.ddtitles, name=&outname) ; 
+%mc_adgtf;
+
+*** Set graphics environment ***;
+/*goptions device=png targetdevice=png xmax=30cm ymax=18cm ftext='heit' htext=1.4 noborder;*/
+ods graphics/reset noborder height=550px width=890px imagefmt=png ;
+
+	%*Split by Subject;
+%macro bysubj;
+	%do k=1 %to 2;
+		data stat1&k;
+			set stat;
+			where page=&k;
+		run;
+
+		%let pg1=&k;
+		%let pg2=2;
+		
+		%*Add pagetext;
+		%mc_addpn(type=FI, data=stat1&k, line=30);
+		
+		
+		proc sgplot data=stat1&k noautolegend nowall noborder dattrmap=attrmap nocycleattrs ;
+			scatter y=ord x=ExpEstimate/ xerrorupper=expupper xerrorlower=explower markerattrs=(symbol=diamondfilled color=black)  ;
+			scatter y=ord x=or/ markerchar=stat  x2axis;
+			refline 1 100/ axis=x lineattrs=(pattern=shortdash  color=black  THICKNESS=1) transparency=0.5 LABELATTRS=(weight=bold);
+			yaxistable label1/position=left textgroup=grp ATTRID=TEXT indentweight=indentWt;
+			yaxistable label2/position=left textgroup=grp ATTRID=TEXT indentweight=indentWt1;
+			yaxistable label3/position=left textgroup=grp ATTRID=TEXT indentweight=indentWt2;
+
+			inset '偏好贝伐珠单抗组' / position=bottomleft ;
+			inset '偏好MIL60组' / position=bottom;
+			refline 1.00/ axis=x lineattrs=(pattern=shortdash) transparency=0.5;
+			%if &k=1 %then %do;
+			xaxis label=" " offsetmin=0 offsetmax=0.3 min=1.25 max=8.25 values=(0.25 to 2.25 by 0.25) labelattrs=(weight=bold);
+			%end;
+			%else %do;
+			xaxis label=" " offsetmin=0 offsetmax=0.1 min=1.25 max=7 values=(0.25 to 2.8 by 0.25) labelattrs=(weight=bold);
+			%end;
+			x2axis offsetmin=0.8 display=(noticks nolabel) ;
+			YAXIS reverse LABELPOS=top label='亚组(受试者人数)' display=none min=1.3 max=10 offsetmin=0.2 offsetmax=0.1 LABELATTRS=(weight=bold);
+		run;
+
+	%end;
+%mend;
+
+ods listing close;
+ods rtf file="&pathfig\&outname..rtf" style=myfont headery=1000 footery=545 nogtitle nogfootnote;
+%bysubj;
+ods rtf close; 
+ods listing;
+
+** Program footer;
+%put PROGRAM %upcase(&progname).sas run on %sysfunc( today() , date9. ) at %sysfunc( time() , time5. ) ;
+%put >>>>> End of PROGRAM %upcase(&progname).sas <<<<< ;
+
+proc printto;
+run;
