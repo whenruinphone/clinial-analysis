@@ -1,0 +1,9 @@
+ dvterm=strip(compbl(translate(j,' ','09'x||'0A'x||'0D'x)));
+ 
+ input(compress(strip(scan(f2,1,'-')),,'kd'),best.)
+ 
+ array dvterm_{2} $200 DVTERM DVTERM1;
+	do z=1 to 2;
+		dvterm_(z)=ksubstrb(F7, 1, 200);
+		F7=ksubstrb(F7, lengthn(dvterm_(z))+1);
+	end; 
