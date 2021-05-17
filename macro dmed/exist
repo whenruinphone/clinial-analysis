@@ -1,0 +1,67 @@
+**1、用宏CHECKDS使用% SYSFUNC来执行EXIST函数，它检查数据集的存在:***/
+
+%macro checkds(dsn);
+   %if %sysfunc(exist(&dsn)) %then
+      %do;
+         proc print data=&dsn;
+         run;
+      %end;
+      %else
+         %put The data set &dsn does not exist.;
+%mend checkds;
+%checkds(Sasuser.Houses)
+
+%sysfunc(exist(&dsn)) ne 0为存在，否则%sysfunc(exist(&dsn))=0为不存在。
+
+/****2、使用% SYSFUNC来执行OPEN函数和ATTRN函数快速获取数据集中的变量和观测值。***/
+
+
+%macro obsnvars(ds);
+   %global dset nvars nobs;
+   %let dset=&ds;
+   %let dsid = %sysfunc(open(&dset));
+   %if &dsid %then
+      %do;
+         %let nobs =%sysfunc(attrn(&dsid,NOBS));
+         %let nvars=%sysfunc(attrn(&dsid,NVARS));
+         %let rc = %sysfunc(close(&dsid));
+         %put &dset has &nvars  variable(s) and &nobs observation(s).;
+      %end;
+   %else
+      %put Open for data set &dset failed - %sysfunc(sysmsg());
+%mend obsnvars;
+%obsnvars(Sasuser.Houses);
+
+/*****3、使用% SYSFUNC来执行OPEN函数判断表是否存在，如果存在关闭*********/
+
+OPTIONS NOCENTER LS=MAX PS=MAX SASMSTORE=SASUSER MSTORED MAUTOSOURCE;
+/*
+*合并数据集
+*T1 BASE 数据集
+*T2 追加数据集
+
+*/
+
+
+%MACRO M_ADD_DATA(T1,T2)/STORE;
+
+    %LET DS_FLAG = %SYSFUNC(OPEN(&T1.,IS));   /***&DS_FLAG=0不存在，&DS_FLAG=1存在****/
+    %IF &DS_FLAG. EQ 0 
+      %THEN %DO; 
+      DATA &T1.;
+      SET &T2.;
+      RUN;
+    %END;  
+    %ELSE %DO; 
+    %LET DS_CLOSE = %SYSFUNC(CLOSE(&DS_FLAG.));/*追加之前要关闭打开的数据集*/
+   
+  DATA &T1.;
+    SET  &T1. &T2.;
+    RUN;
+
+PROC CONTENTS DATA=&T1.;
+RUN;
+
+    %END;
+%MEND;
+————————————————
